@@ -1,3 +1,4 @@
+use crate::i18n::{t, Lang};
 use crate::models::{AppState, Command, HotkeyAction, HotkeyConfig, KeyCombo, MacroRecording};
 use crossbeam_channel::{Receiver, Sender};
 use eframe::{egui, NativeOptions};
@@ -23,6 +24,7 @@ pub struct TinyTaskApp {
     assigning_hotkey: Option<HotkeyAction>,
     key_capture_active: bool,
     hotkey_msg: String,
+    lang: Lang,
 }
 
 impl TinyTaskApp {
@@ -33,6 +35,7 @@ impl TinyTaskApp {
         cmd_tx: Sender<Command>,
         event_rx: Receiver<String>,
         stop_flag: Arc<AtomicBool>,
+        lang: Lang,
     ) -> Self {
         Self {
             state,
@@ -41,7 +44,7 @@ impl TinyTaskApp {
             cmd_tx,
             event_rx,
             stop_flag,
-            status_message: "Hazır".to_string(),
+            status_message: t(lang, "ready").to_string(),
             event_count: 0,
             current_tab: 0,
             loop_count: 1,
@@ -49,7 +52,12 @@ impl TinyTaskApp {
             assigning_hotkey: None,
             key_capture_active: false,
             hotkey_msg: String::new(),
+            lang,
         }
+    }
+
+    fn tr(&self, key: &'static str) -> &'static str {
+        t(self.lang, key)
     }
 
     /// Acil durdurma: önce paylaşılan bayrağı set et (player anında görür),
@@ -79,11 +87,17 @@ impl eframe::App for TinyTaskApp {
             ui.heading("Linux TinyTask");
             ui.separator();
 
+            let (tab0, tab1, tab2, tab3) = (
+                self.tr("tab_control"),
+                self.tr("tab_macros"),
+                self.tr("tab_settings"),
+                self.tr("tab_about"),
+            );
             ui.horizontal(|ui| {
-                ui.selectable_value(&mut self.current_tab, 0, "Kontrol");
-                ui.selectable_value(&mut self.current_tab, 1, "Makrolar");
-                ui.selectable_value(&mut self.current_tab, 2, "Ayarlar");
-                ui.selectable_value(&mut self.current_tab, 3, "Hakkında");
+                ui.selectable_value(&mut self.current_tab, 0, tab0);
+                ui.selectable_value(&mut self.current_tab, 1, tab1);
+                ui.selectable_value(&mut self.current_tab, 2, tab2);
+                ui.selectable_value(&mut self.current_tab, 3, tab3);
             });
 
             ui.separator();
@@ -103,13 +117,15 @@ impl eframe::App for TinyTaskApp {
 
 impl TinyTaskApp {
     fn show_control_tab(&mut self, ui: &mut egui::Ui, current_state: AppState) {
+        let (rec_idle, btn_stop, play_idle) =
+            (self.tr("rec_idle"), self.tr("btn_stop"), self.tr("play_idle"));
         ui.horizontal(|ui| {
             let (rec_text, rec_enabled, play_enabled) = match current_state {
-                AppState::Idle => ("● Kaydet", true, self.event_count > 0),
-                AppState::Recording => ("■ Durdur", true, false),
+                AppState::Idle => (rec_idle, true, self.event_count > 0),
+                AppState::Recording => (btn_stop, true, false),
                 // Playing'de HER İKİ buton da acil stop: kullanıcı hangisine
                 // basarsa bassın durmalı (önceden sol buton ölüydü).
-                AppState::Playing => ("■ Durdur", true, true),
+                AppState::Playing => (btn_stop, true, true),
             };
 
             if ui
@@ -140,9 +156,9 @@ impl TinyTaskApp {
             }
 
             let play_text = if current_state == AppState::Playing {
-                "■ Durdur"
+                btn_stop
             } else {
-                "▶ Oynat"
+                play_idle
             };
 
             if ui
@@ -169,16 +185,21 @@ impl TinyTaskApp {
         ui.add_space(10.0);
         ui.separator();
 
-        ui.label("Döngü Ayarları:");
+        ui.label(self.tr("loop_title"));
+        let (loop_infinite, loop_times, loop_apply) = (
+            self.tr("loop_infinite"),
+            self.tr("loop_times"),
+            self.tr("loop_apply"),
+        );
         ui.horizontal(|ui| {
-            ui.checkbox(&mut self.infinite_loop, "Sonsuz döngü");
+            ui.checkbox(&mut self.infinite_loop, loop_infinite);
 
             if !self.infinite_loop {
-                ui.add(egui::Slider::new(&mut self.loop_count, 1..=9999).text("kez"));
+                ui.add(egui::Slider::new(&mut self.loop_count, 1..=9999).text(loop_times));
             }
         });
 
-        if ui.button("Döngü Ayarını Uygula").clicked() {
+        if ui.button(loop_apply).clicked() {
             let count = if self.infinite_loop { 0 } else { self.loop_count };
             self.cmd_tx.send(Command::SetLoopCount(count)).ok();
         }
@@ -186,9 +207,10 @@ impl TinyTaskApp {
         ui.add_space(10.0);
         ui.separator();
 
-        ui.label("Dosya:");
+        ui.label(self.tr("file_row"));
+        let (save_quick, load_quick) = (self.tr("save_quick"), self.tr("load_quick"));
         ui.horizontal(|ui| {
-            if ui.button("💾 Kaydet").clicked() {
+            if ui.button(save_quick).clicked() {
                 let name = self.recording.lock().unwrap().name.clone();
                 if let Some(path) = rfd::FileDialog::new()
                     .add_filter("TinyTask Macro", &["tts"])
@@ -201,7 +223,7 @@ impl TinyTaskApp {
                         .ok();
                 }
             }
-            if ui.button("📂 Yükle").clicked() {
+            if ui.button(load_quick).clicked() {
                 if let Some(path) = rfd::FileDialog::new()
                     .add_filter("TinyTask Macro", &["tts", "json"])
                     .pick_file()
@@ -216,16 +238,19 @@ impl TinyTaskApp {
         ui.add_space(10.0);
         ui.separator();
 
-        ui.label(format!("Durum: {}", self.status_message));
-        ui.label(format!("Kaydedilen event: {}", self.event_count));
+        ui.label(self.tr("status_line").replace("{m}", &self.status_message));
+        ui.label(
+            self.tr("events_line")
+                .replace("{n}", &self.event_count.to_string()),
+        );
         {
             let rec = self.recording.lock().unwrap();
-            ui.label(format!(
-                "Makro: {} | Süre: {} | Oluşturulma: {}",
-                rec.name,
-                rec.duration_string(),
-                rec.created_at
-            ));
+            ui.label(
+                self.tr("macro_line")
+                    .replace("{name}", &rec.name)
+                    .replace("{dur}", &rec.duration_string())
+                    .replace("{ts}", &rec.created_at.to_string()),
+            );
         }
 
         let state_color = match current_state {
@@ -237,15 +262,15 @@ impl TinyTaskApp {
         ui.colored_label(
             state_color,
             match current_state {
-                AppState::Idle => "○ Boşta",
-                AppState::Recording => "● KAYIT YAPILIYOR",
-                AppState::Playing => "● OYNATILIYOR",
+                AppState::Idle => self.tr("state_idle"),
+                AppState::Recording => self.tr("state_recording"),
+                AppState::Playing => self.tr("state_playing"),
             },
         );
     }
 
     fn show_macros_tab(&mut self, ui: &mut egui::Ui) {
-        ui.heading("Makro Yönetimi");
+        ui.heading(self.tr("macros_heading"));
         ui.add_space(5.0);
 
         let (name, created_at, duration, count) = {
@@ -258,16 +283,20 @@ impl TinyTaskApp {
             )
         };
 
-        ui.label(format!("Ad: {}", name));
-        ui.label(format!("Süre: {}", duration));
-        ui.label(format!("Event sayısı: {}", count));
-        ui.label(format!("Oluşturulma (unix): {}", created_at));
+        ui.label(self.tr("macros_name").replace("{v}", &name));
+        ui.label(self.tr("macros_dur").replace("{v}", &duration));
+        ui.label(self.tr("macros_events").replace("{v}", &count.to_string()));
+        ui.label(
+            self.tr("macros_created")
+                .replace("{v}", &created_at.to_string()),
+        );
 
         ui.add_space(10.0);
         ui.separator();
 
+        let (macros_save, macros_load) = (self.tr("macros_save"), self.tr("macros_load"));
         ui.horizontal(|ui| {
-            if ui.button("💾 Makroyu Kaydet").clicked() {
+            if ui.button(macros_save).clicked() {
                 // Native dialog; UI thread'de açılır, IO recorder thread'de yapılır.
                 if let Some(path) = rfd::FileDialog::new()
                     .add_filter("TinyTask Macro", &["tts"])
@@ -279,7 +308,7 @@ impl TinyTaskApp {
                     self.cmd_tx.send(Command::SaveMacro(p)).ok();
                 }
             }
-            if ui.button("📂 Makro Yükle").clicked() {
+            if ui.button(macros_load).clicked() {
                 if let Some(path) = rfd::FileDialog::new()
                     .add_filter("TinyTask Macro", &["tts", "json"])
                     .pick_file()
@@ -291,47 +320,45 @@ impl TinyTaskApp {
         });
 
         ui.add_space(5.0);
-        ui.label("Format: .tts (binary, küçük/hızlı) veya .json (okunabilir/debug).");
-        ui.label("Yüklenen makro anında oynatmaya hazır hale gelir.");
+        ui.label(self.tr("macros_fmt1"));
+        ui.label(self.tr("macros_fmt2"));
         if count == 0 {
-            ui.colored_label(
-                egui::Color32::YELLOW,
-                "Henüz kayıt yok — önce Kontrol sekmesinde kayıt yapın veya dosya yükleyin.",
-            );
+            ui.colored_label(egui::Color32::YELLOW, self.tr("macros_empty"));
         }
     }
 
     fn show_settings_tab(&mut self, ui: &mut egui::Ui) {
-        ui.heading("Klavye Kısayolları");
+        ui.heading(self.tr("set_heading"));
         ui.add_space(5.0);
 
         let config = self.hotkey_config.lock().unwrap().clone();
+        let set_change = self.tr("set_change");
 
         ui.horizontal(|ui| {
-            ui.label("Kayıt Başlat/Durdur:");
+            ui.label(self.tr("set_record"));
             ui.label(config.record.to_string());
 
-            if ui.button("Değiştir").clicked() {
+            if ui.button(set_change).clicked() {
                 self.assigning_hotkey = Some(HotkeyAction::Record);
                 self.key_capture_active = true;
             }
         });
 
         ui.horizontal(|ui| {
-            ui.label("Oynat Başlat:");
+            ui.label(self.tr("set_play"));
             ui.label(config.play.to_string());
 
-            if ui.button("Değiştir").clicked() {
+            if ui.button(set_change).clicked() {
                 self.assigning_hotkey = Some(HotkeyAction::Play);
                 self.key_capture_active = true;
             }
         });
 
         ui.horizontal(|ui| {
-            ui.label("Oynatmayı Durdur:");
+            ui.label(self.tr("set_stop"));
             ui.label(config.stop.to_string());
 
-            if ui.button("Değiştir").clicked() {
+            if ui.button(set_change).clicked() {
                 self.assigning_hotkey = Some(HotkeyAction::Stop);
                 self.key_capture_active = true;
             }
@@ -340,11 +367,8 @@ impl TinyTaskApp {
         ui.add_space(10.0);
 
         if self.key_capture_active {
-            ui.colored_label(
-                egui::Color32::YELLOW,
-                "Yeni kısayolu girin: tek tuş (örn. F8) veya Ctrl/Alt/Shift ile birlikte bir tuş...",
-            );
-            ui.label("Atamak için tuşa basın. Vazgeçmek için İptal'e tıklayın.");
+            ui.colored_label(egui::Color32::YELLOW, self.tr("set_capture"));
+            ui.label(self.tr("set_capture2"));
 
             // Bu frame'de basılan (edge) ilk tuşu yakala
             let mut captured: Option<(egui::Key, egui::Modifiers)> = None;
@@ -378,14 +402,15 @@ impl TinyTaskApp {
                             crate::save_config(&cfg);
                         }
                         self.cmd_tx.send(Command::SetHotkey(action, combo)).ok();
-                        self.hotkey_msg = format!("Atandı: {}", label);
+                        self.hotkey_msg =
+                            self.tr("set_assigned").replace("{v}", &label);
                     }
                     self.assigning_hotkey = None;
                     self.key_capture_active = false;
                 }
             }
 
-            if ui.button("İptal").clicked() {
+            if ui.button(self.tr("set_cancel")).clicked() {
                 self.assigning_hotkey = None;
                 self.key_capture_active = false;
             }
@@ -396,16 +421,40 @@ impl TinyTaskApp {
         }
 
         ui.add_space(5.0);
-        ui.label("⚠ Tek tuş (örn. A, Space) yazı yazarken de tetiklenir. F8–F12 önerilir.");
+        ui.label(self.tr("set_warn"));
 
         ui.add_space(10.0);
         ui.separator();
 
-        if ui.button("Varsayılan Kısayollara Döndür").clicked() {
-            let defaults = HotkeyConfig::default();
+        // Language picker (persisted to config)
+        let set_lang = self.tr("set_lang");
+        let lang_before = self.lang;
+        ui.horizontal(|ui| {
+            ui.label(set_lang);
+            egui::ComboBox::from_id_source("lang_combo")
+                .selected_text(self.lang.label())
+                .show_ui(ui, |ui| {
+                    for l in Lang::all() {
+                        ui.selectable_value(&mut self.lang, *l, l.label());
+                    }
+                });
+        });
+        if self.lang != lang_before {
+            let mut cfg = self.hotkey_config.lock().unwrap();
+            cfg.lang = self.lang.code().to_string();
+            crate::save_config(&cfg);
+        }
+
+        ui.add_space(10.0);
+        ui.separator();
+
+        if ui.button(self.tr("set_reset")).clicked() {
+            // Defaults reset hotkeys but preserve the UI language
+            let mut defaults = HotkeyConfig::default();
+            defaults.lang = self.lang.code().to_string();
             crate::save_config(&defaults);
             *self.hotkey_config.lock().unwrap() = defaults;
-            self.hotkey_msg = "Varsayılanlara dönüldü.".to_string();
+            self.hotkey_msg = self.tr("set_defaults").to_string();
         }
     }
 
@@ -456,20 +505,20 @@ impl TinyTaskApp {
     }
 
     fn show_about_tab(&mut self, ui: &mut egui::Ui) {
-        ui.heading("Hakkında");
+        ui.heading(self.tr("about_heading"));
         ui.add_space(10.0);
         ui.label("Linux TinyTask v0.1.0");
-        ui.label("Minimalist makro kaydedici ve oynatıcı");
+        ui.label(self.tr("about_sub"));
         ui.add_space(5.0);
-        ui.label("Özellikler:");
-        ui.label("• Kernel seviyesinde girdi yakalama");
-        ui.label("• X11/Wayland bağımsız");
-        ui.label("• Milisaniye hassasiyeti");
-        ui.label("• Oyun desteği");
-        ui.label("• Döngü modu");
-        ui.label("• Özelleştirilebilir kısayollar");
+        ui.label(self.tr("about_feat"));
+        ui.label(self.tr("about_f1"));
+        ui.label(self.tr("about_f2"));
+        ui.label(self.tr("about_f3"));
+        ui.label(self.tr("about_f4"));
+        ui.label(self.tr("about_f5"));
+        ui.label(self.tr("about_f6"));
         ui.add_space(10.0);
-        ui.label("Luna tarafından geliştirilmiştir.");
+        ui.label(self.tr("about_credit"));
     }
 }
 
@@ -480,6 +529,7 @@ pub fn run_ui(
     cmd_tx: Sender<Command>,
     event_rx: Receiver<String>,
     stop_flag: Arc<AtomicBool>,
+    lang: Lang,
 ) {
     let options = NativeOptions {
         viewport: egui::ViewportBuilder::default()
@@ -494,7 +544,7 @@ pub fn run_ui(
     if let Err(e) = eframe::run_native(
         "Linux TinyTask",
         options,
-        Box::new(|_cc| {
+        Box::new(move |_cc| {
             Box::new(TinyTaskApp::new(
                 state,
                 recording,
@@ -502,6 +552,7 @@ pub fn run_ui(
                 cmd_tx,
                 event_rx,
                 stop_flag,
+                lang,
             )) as Box<dyn eframe::App>
         }),
     ) {

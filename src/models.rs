@@ -348,6 +348,13 @@ pub struct HotkeyConfig {
     pub record: KeyCombo,
     pub play: KeyCombo,
     pub stop: KeyCombo,
+    /// UI language code ("en", "tr", ...). Defaulted so old config files still parse.
+    #[serde(default = "default_lang_code")]
+    pub lang: String,
+}
+
+fn default_lang_code() -> String {
+    "tr".to_string()
 }
 
 impl Default for HotkeyConfig {
@@ -356,6 +363,7 @@ impl Default for HotkeyConfig {
             record: KeyCombo::new(19), // R
             play: KeyCombo::new(25),   // P
             stop: KeyCombo::new(31),   // S
+            lang: default_lang_code(),
         }
     }
 }

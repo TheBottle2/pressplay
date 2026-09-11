@@ -1,9 +1,11 @@
+mod i18n;
 mod models;
 mod player;
 mod recorder;
 mod ui;
 
 use crossbeam_channel::bounded;
+use i18n::Lang;
 use log::{info, warn};
 use models::{AppState, Command, HotkeyConfig, MacroEvent, MacroRecording};
 use player::Player;
@@ -168,7 +170,8 @@ fn main() {
     });
 
     info!("UI başlatılıyor...");
-    ui::run_ui(state, recording, hotkey_config, cmd_tx, event_rx, stop_flag);
+    let lang = Lang::from_code(&hotkey_config.lock().unwrap().lang).unwrap_or_default();
+    ui::run_ui(state, recording, hotkey_config, cmd_tx, event_rx, stop_flag, lang);
 
     info!("Uygulama kapatılıyor...");
     std::process::exit(0);

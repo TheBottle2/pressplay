@@ -36,7 +36,8 @@ cargo build --release
 - **Loop mode**: 1–9999 repeats or infinite loop (`0 = infinite`), 50ms gap between loops
 - **Global hotkeys**: system-wide shortcuts for record/play/stop (dedicated hotkey thread)
 - **Config persistence**: hotkey configuration stored as JSON in `~/.config/linux-tinytask/tinytask_config.json`
-- **Minimalist UI**: `eframe/egui`, always-on-top, 420x480, tabbed interface (currently in Turkish: Kontrol / Makrolar / Ayarlar / Hakkında — English translations are given in parentheses throughout this README)
+- **Minimalist UI**: `eframe/egui`, always-on-top, 420x480, tabbed interface
+- **9 UI languages**: English, Türkçe, Deutsch, Français, Español, Português, Italiano, Nederlands, Polski — switchable in Settings, saved to config (more scripts need a custom font, see roadmap)
 - **Multi-threaded architecture**: Dispatcher + Recorder + Player + Sync + Hotkey + UI threads communicating over `crossbeam-channel`
 
 ### Default Shortcuts
@@ -46,8 +47,9 @@ cargo build --release
 | Start playback | `Ctrl+Alt+Shift+P` |
 | Stop playback | `Ctrl+Alt+Shift+S` |
 
-Shortcuts can be changed in the **Ayarlar** (Settings) tab: click **Değiştir** (Change) → press a single key (e.g. `F8`) or a key with `Ctrl/Alt/Shift`. Assignment takes effect immediately and is saved to disk.
+Shortcuts can be changed in the Settings tab: click Change → press a single key (e.g. `F8`) or a key with `Ctrl/Alt/Shift`. Assignment takes effect immediately and is saved to disk.
 > ⚠ Single-letter/key shortcuts also fire while typing — `F8–F12` recommended. The `Super` key cannot be captured (egui doesn't report it); existing Super-based shortcuts keep working.
+> 🌍 The interface language is switchable in Settings (9 languages, default Türkçe) and persists across restarts.
 
 > Note: `KeyCombo::new()` defaults to `ctrl+alt+shift` held + main key. Matching in `KeyCombo::matches()` checks left/right Ctrl/Alt/Shift/Super codes. 200ms debounce.
 
@@ -69,6 +71,7 @@ linux-tinytask/
 ├── src/
 │   ├── main.rs      # Config load/save, dispatcher, sync thread, hotkey thread, thread spawn
 │   ├── models.rs    # MacroEvent, MacroRecording, AppState, KeyCombo, HotkeyConfig, Command
+│   ├── i18n.rs      # Built-in translations (9 languages) + completeness tests
 │   ├── recorder.rs  # /dev/input enumeration + poll + recording (all events except SYN)
 │   ├── player.rs    # uinput virtual device + precise_sleep_interruptible + loop playback
 │   └── ui.rs        # eframe/egui tabs: Kontrol / Makrolar / Ayarlar / Hakkında
@@ -201,7 +204,8 @@ Honest list for the current code (details in `HANDOFF.md`):
 - [x] Hotkey assignment (incl. single key: Ayarlar → Değiştir → press key; saved to disk)
 - [x] Auto-release stuck keys on stop/finish (broken keyboard/mouse fix)
 - [x] One-command install (`install.sh`) with menu entry
-- [ ] English UI translation (UI is Turkish-only for now; this README gives English glosses)
+- [x] Multilingual UI (9 Latin-script languages, persisted)
+- [ ] More UI languages (Russian/Chinese/Arabic need a bundled custom font — embedded Ubuntu-Light has no Cyrillic/CJK)
 - [ ] ABS axis + `REL_Z` etc. virtual-device extension
 - [ ] Clean shutdown (`Quit` propagation, remove `process::exit`)
 - [ ] Filter hotkey presses out of recordings
@@ -223,4 +227,4 @@ Honest list for the current code (details in `HANDOFF.md`):
 | Hotkey not working | Another app may swallow the key; watch pressed codes with `RUST_LOG=debug` |
 | "Does it work on Wayland?" | Yes — the app reads the kernel directly (`/dev/input`), bypassing the compositor entirely. If it fails on Wayland, it's a permission issue (see above), not a Wayland issue |
 | Menu entry does nothing | `~/.local/bin` may not be in PATH or groups need relogin → log out/in, then check `which linux-tinytask` |
-| Logs are in Turkish | Status messages in the UI are English, but detailed logs (`RUST_LOG=...`) are currently Turkish — English UI/logs are on the roadmap |
+| Logs are in Turkish | Status messages in the UI follow the selected language, but detailed logs (`RUST_LOG=...`) are currently Turkish |

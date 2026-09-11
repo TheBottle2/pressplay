@@ -2,7 +2,7 @@
 name = "linux-tinytask"
 version = "0.1.0"
 edition = "2021"
-authors = ["Luna"]
+authors = ["TheBottle2"]
 
 [dependencies]
 evdev = "0.12"

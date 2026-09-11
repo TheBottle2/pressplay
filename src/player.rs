@@ -71,7 +71,7 @@ impl Player {
         rel_axes.insert(RelativeAxisType::REL_HWHEEL);
 
         VirtualDeviceBuilder::new()?
-            .name("LinuxTinyTask Virtual Device")
+            .name("PressPlay Virtual Device")
             .with_keys(&keys)?
             .with_relative_axes(&rel_axes)?
             .build()

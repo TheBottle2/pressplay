@@ -2195,25 +2195,6 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "32a66949e030da00e8c7d4434b251670a91556f4144941d37452769c25d58a53"
 
 [[package]]
-name = "linux-tinytask"
-version = "0.1.0"
-dependencies = [
- "bincode",
- "chrono",
- "crossbeam-channel",
- "dirs",
- "eframe",
- "egui",
- "env_logger",
- "evdev",
- "log",
- "nix 0.28.0",
- "rfd",
- "serde",
- "serde_json",
-]
-
-[[package]]
 name = "litemap"
 version = "0.8.3"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -2828,6 +2809,25 @@ name = "presser"
 version = "0.3.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "e8cf8e6a8aa66ce33f63993ffc4ea4271eb5b0530a9002db8455ea6050c77bfa"
+
+[[package]]
+name = "pressplay"
+version = "0.2.0"
+dependencies = [
+ "bincode",
+ "chrono",
+ "crossbeam-channel",
+ "dirs",
+ "eframe",
+ "egui",
+ "env_logger",
+ "evdev",
+ "log",
+ "nix 0.28.0",
+ "rfd",
+ "serde",
+ "serde_json",
+]
 
 [[package]]
 name = "proc-macro-crate"

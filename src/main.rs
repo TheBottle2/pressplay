@@ -19,11 +19,20 @@ use std::sync::{
 
 const CONFIG_FILE: &str = "tinytask_config.json";
 
-pub(crate) fn get_config_path() -> PathBuf {    let mut path = dirs::config_dir().unwrap_or_else(|| PathBuf::from("."));
-    path.push("linux-tinytask");
-    fs::create_dir_all(&path).ok();
-    path.push(CONFIG_FILE);
-    path
+pub(crate) fn get_config_path() -> PathBuf {
+    let base = dirs::config_dir().unwrap_or_else(|| PathBuf::from("."));
+    let dir = base.join("pressplay");
+    if !dir.exists() {
+        // Pre-0.2.0 kurulumundan ayarları taşı (hotkey + dil + son dosyalar korunur)
+        let old_dir = base.join("linux-tinytask");
+        if old_dir.exists() {
+            if fs::rename(&old_dir, &dir).is_ok() {
+                log::info!("Migrated config: linux-tinytask -> pressplay");
+            }
+        }
+    }
+    fs::create_dir_all(&dir).ok();
+    dir.join(CONFIG_FILE)
 }
 
 fn load_config() -> HotkeyConfig {
@@ -48,7 +57,7 @@ pub(crate) fn save_config(config: &HotkeyConfig) {
 fn main() {
     env_logger::Builder::from_env(env_logger::Env::default().default_filter_or("info")).init();
 
-    info!("Starting Linux TinyTask...");
+    info!("Starting PressPlay...");
     info!("NOTE: This app requires /dev/input and /dev/uinput access.");
 
     let state = Arc::new(Mutex::new(AppState::Idle));

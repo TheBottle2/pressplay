@@ -90,7 +90,7 @@ impl eframe::App for TinyTaskApp {
         egui::CentralPanel::default().show(ctx, |ui| {
             let current_state = *self.state.lock().unwrap();
 
-            ui.heading("Linux TinyTask");
+            ui.heading("PressPlay");
             ui.separator();
 
             let (tab0, tab1, tab2, tab3) = (
@@ -253,7 +253,7 @@ impl TinyTaskApp {
             if ui.button(save_quick).clicked() {
                 let name = self.recording.lock().unwrap().name.clone();
                 if let Some(path) = rfd::FileDialog::new()
-                    .add_filter("TinyTask Macro", &["tts"])
+                    .add_filter("PressPlay Macro", &["tts"])
                     .add_filter("JSON", &["json"])
                     .set_file_name(format!("{}.tts", name))
                     .save_file()
@@ -265,7 +265,7 @@ impl TinyTaskApp {
             }
             if ui.button(load_quick).clicked() {
                 if let Some(path) = rfd::FileDialog::new()
-                    .add_filter("TinyTask Macro", &["tts", "json"])
+                    .add_filter("PressPlay Macro", &["tts", "json"])
                     .pick_file()
                 {
                     self.cmd_tx
@@ -339,7 +339,7 @@ impl TinyTaskApp {
             if ui.button(macros_save).clicked() {
                 // Native dialog; UI thread'de açılır, IO recorder thread'de yapılır.
                 if let Some(path) = rfd::FileDialog::new()
-                    .add_filter("TinyTask Macro", &["tts"])
+                    .add_filter("PressPlay Macro", &["tts"])
                     .add_filter("JSON", &["json"])
                     .set_file_name(format!("{}.tts", name))
                     .save_file()
@@ -350,7 +350,7 @@ impl TinyTaskApp {
             }
             if ui.button(macros_load).clicked() {
                 if let Some(path) = rfd::FileDialog::new()
-                    .add_filter("TinyTask Macro", &["tts", "json"])
+                    .add_filter("PressPlay Macro", &["tts", "json"])
                     .pick_file()
                 {
                     let p = path.to_string_lossy().to_string();
@@ -574,7 +574,7 @@ impl TinyTaskApp {
     fn show_about_tab(&mut self, ui: &mut egui::Ui) {
         ui.heading(self.tr("about_heading"));
         ui.add_space(10.0);
-        ui.label("Linux TinyTask v0.1.0");
+        ui.label(format!("PressPlay v{}", env!("CARGO_PKG_VERSION")));
         ui.label(self.tr("about_sub"));
         ui.add_space(5.0);
         ui.label(self.tr("about_feat"));
@@ -609,7 +609,7 @@ pub fn run_ui(
     };
 
     if let Err(e) = eframe::run_native(
-        "Linux TinyTask",
+        "PressPlay",
         options,
         Box::new(move |_cc| {
             Box::new(TinyTaskApp::new(

@@ -1,0 +1,10 @@
+[Desktop Entry]
+Type=Application
+Name=PressPlay
+GenericName=Macro recorder
+Comment=Kernel-level macro recorder and player for Linux (X11/Wayland)
+Exec=pressplay
+Icon=pressplay
+Categories=Utility;
+Terminal=false
+StartupNotify=true

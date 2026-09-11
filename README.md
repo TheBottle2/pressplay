@@ -1,8 +1,10 @@
-# Linux TinyTask
+# PressPlay
 
 **Minimalist, kernel-level macro recorder and player for Linux**
 
-Linux TinyTask is the Linux counterpart of the popular Windows TinyTask app. It talks directly to the Linux kernel input subsystem (`/dev/input` + `/dev/uinput`), independent of X11 and Wayland, recording and replaying macros with millisecond/microsecond precision.
+PressPlay talks directly to the Linux kernel input subsystem (`/dev/input` + `/dev/uinput`), independent of X11 and Wayland, recording and replaying macros with millisecond/microsecond precision.
+
+> Inspired by TinyTask for Windows. Independent project, not affiliated with or endorsed by TinyTask.
 
 ## ⚡ Quick Start (simplest)
 
@@ -13,7 +15,7 @@ One-time setup (builds, installs a menu entry, fixes permissions — sudo is ask
 # if you were added to the 'input' group: log out and back in once
 ```
 
-After that, launch **Linux TinyTask** from the app menu — no terminal, no sudo needed.
+After that, launch **PressPlay** from the app menu — no terminal, no sudo needed.
 
 Alternative (without install, from this folder):
 
@@ -26,7 +28,7 @@ cargo build --release
 
 ### Working Features
 - **Kernel-level recording**: captures all keyboard + mouse keys/buttons and relative motion via `/dev/input/event*`, 1ms `poll` timeout (ABS axes are recorded too but can't be replayed yet — see limitations)
-- **Kernel-level playback**: event injection through a `/dev/uinput` virtual device (`LinuxTinyTask Virtual Device`)
+- **Kernel-level playback**: event injection through a `/dev/uinput` virtual device (`PressPlay Virtual Device`)
 - **Display-server independence**: works on X11/Wayland/Proton/Wine, no X11/Wayland library dependencies
 - **Precise timing**: deadline-based, interruptible `precise_sleep_interruptible` (busy-wait under 100µs, chunked 2ms sleep + 800µs spin above), waiting `timestamp_us` deltas per event
 - **Emergency stop**: `AtomicBool` stop flag checked before every event and ~every 1ms inside sleep; `StopPlayback` halts emission instantly, **auto-releases stuck keys** (no more broken keyboard/mouse from a wedged Ctrl) and returns to Idle (with in-playback channel polling)
@@ -38,7 +40,7 @@ cargo build --release
 - **Record filter**: capture keyboard-only or mouse-only (Control tab checkboxes, at least one stays on)
 - **Recent files**: last 8 macros in the Macros tab, one-click load (missing files shown greyed out)
 - **Global hotkeys**: system-wide shortcuts for record/play/stop (dedicated hotkey thread)
-- **Config persistence**: hotkey configuration stored as JSON in `~/.config/linux-tinytask/tinytask_config.json`
+- **Config persistence**: hotkey configuration stored as JSON in `~/.config/pressplay/tinytask_config.json` (auto-migrated from `~/.config/linux-tinytask/` on first run after 0.2.0)
 - **Minimalist UI**: `eframe/egui`, always-on-top, 420x480, tabbed interface
 - **9 UI languages**: English, Türkçe, Deutsch, Français, Español, Português, Italiano, Nederlands, Polski — switchable in Settings, saved to config (more scripts need a custom font, see roadmap)
 - **Multi-threaded architecture**: Dispatcher + Recorder + Player + Sync + Hotkey + UI threads communicating over `crossbeam-channel`
@@ -70,9 +72,9 @@ Recorder/Player ──String──▶ UI (status_message)
 
 ### File Structure
 ```
-linux-tinytask/
+pressplay/
 ├── src/
-│   ├── main.rs      # Config load/save, dispatcher, sync thread, hotkey thread, thread spawn
+│   ├── main.rs      # Config load/save (+ migration), dispatcher, sync/hotkey threads
 │   ├── models.rs    # MacroEvent, MacroRecording, AppState, KeyCombo, HotkeyConfig, Command
 │   ├── i18n.rs      # Built-in translations (9 languages) + completeness tests
 │   ├── recorder.rs  # /dev/input enumeration + poll + recording (all events except SYN)
@@ -84,7 +86,7 @@ linux-tinytask/
 ├── install.sh           # One-time setup: build + menu entry + permissions
 ├── run.sh               # Run with sudo while preserving display env
 ├── build_appimage.sh
-├── linux-tinytask.desktop
+├── pressplay.desktop
 ├── icon.png / icon.svg
 ├── README.md
 └── HANDOFF.md       # Session handoff file (Turkish, updated after every change)
@@ -135,14 +137,14 @@ sudo dnf install gcc make systemd-devel
 # 3. Permissions (pick one)
 sudo usermod -a -G input $USER   # then log out/in (recommended, permanent)
 # /dev/uinput is usually root-only: allow the input group (same as install.sh does)
-echo 'KERNEL=="uinput", GROUP="input", MODE="0660"' | sudo tee /etc/udev/rules.d/99-tinytask-uinput.rules
+echo 'KERNEL=="uinput", GROUP="input", MODE="0660"' | sudo tee /etc/udev/rules.d/99-pressplay-uinput.rules
 sudo udevadm control --reload-rules && sudo udevadm trigger --subsystem-misc
 # or run as root with display env preserved (see below)
 
 # 4. Build & run
 cargo build --release
-./target/release/linux-tinytask
-# log level: RUST_LOG=debug ./target/release/linux-tinytask
+./target/release/pressplay
+# log level: RUST_LOG=debug ./target/release/pressplay
 ```
 
 ### Running as root (GUI + sudo)
@@ -150,17 +152,17 @@ Bare `sudo` wipes the environment and the GUI can't connect to the display. Eith
 ```bash
 ./run.sh                                   # release binary via sudo, display preserved
 sudo env "DISPLAY=$DISPLAY" "WAYLAND_DISPLAY=$WAYLAND_DISPLAY" \
-  "XDG_RUNTIME_DIR=$XDG_RUNTIME_DIR" ./target/release/linux-tinytask
+  "XDG_RUNTIME_DIR=$XDG_RUNTIME_DIR" ./target/release/pressplay
 ```
-Note: when run as root, the config is written under `/root/.config/linux-tinytask/`.
+Note: when run as root, the config is written under `/root/.config/pressplay/`.
 
 ### AppImage (portable)
 ```bash
 chmod +x build_appimage.sh
 ./build_appimage.sh
-chmod +x Linux_TinyTask-*.AppImage
+chmod +x PressPlay-*.AppImage
 sudo env "DISPLAY=$DISPLAY" "WAYLAND_DISPLAY=$WAYLAND_DISPLAY" \
-  "XDG_RUNTIME_DIR=$XDG_RUNTIME_DIR" ./Linux_TinyTask-*.AppImage
+  "XDG_RUNTIME_DIR=$XDG_RUNTIME_DIR" ./PressPlay-*.AppImage
 ```
 
 ## 🖥️ Usage
@@ -174,7 +176,7 @@ sudo env "DISPLAY=$DISPLAY" "WAYLAND_DISPLAY=$WAYLAND_DISPLAY" \
 Optional per session: tick `Keyboard`/`Mouse` in the Control tab to record only one device class; set `Speed` (0.25x–4x) + `Apply Speed` to replay faster/slower. Hotkey presses (e.g. the stop key) are automatically excluded from recordings.
 
 ### Config File
-Path: `~/.config/linux-tinytask/tinytask_config.json`
+Path: `~/.config/pressplay/tinytask_config.json`
 Example:
 ```json
 {
@@ -234,5 +236,5 @@ Honest list for the current code (details in `HANDOFF.md`):
 | `No events to play!` | Recording empty → record first or load a file from the Macros tab (unsaved recordings reset on restart) |
 | Hotkey not working | Another app may swallow the key; watch pressed codes with `RUST_LOG=debug` |
 | "Does it work on Wayland?" | Yes — the app reads the kernel directly (`/dev/input`), bypassing the compositor entirely. If it fails on Wayland, it's a permission issue (see above), not a Wayland issue |
-| Menu entry does nothing | `~/.local/bin` may not be in PATH or groups need relogin → log out/in, then check `which linux-tinytask` |
+| Menu entry does nothing | `~/.local/bin` may not be in PATH or groups need relogin → log out/in, then check `which pressplay` |
 | Logs are in Turkish | Status messages in the UI follow the selected language; older builds logged in Turkish — current logs are English |

@@ -1,11 +1,11 @@
-# HANDOFF.md — Linux TinyTask
+# HANDOFF.md — PressPlay (eski ad: Linux TinyTask)
 
 > **Bu dosyanın kuralı:** Her işlem (kod değişikliği, hata düzeltme, araştırma, doc güncellemesi) bittiğinde bu dosya güncellenmek ZORUNDADIR.
 > Güncelleme formatı: `Son Güncelleme` tarihini değiştir + `Geçmiş` tablosuna satır ekle + etkilenen bölümleri (`Durum`, `Sonraki Adımlar`, `Teknik Borç`) düzelt.
 > Dosya Türkçe tutulur.
 
-- **Son Güncelleme:** 2026-09-09
-- **Proje:** linux-tinytask v0.1.0 (`/mnt/harddisk/my_apps/linux-tinytask`)
+- **Son Güncelleme:** 2026-09-11
+- **Proje:** pressplay v0.2.0 (`/mnt/harddisk/my_apps/linux-tinytask` klasöründe; klasör adı değişmedi)
 - **Dil/Stack:** Rust 2021, evdev 0.12, nix 0.28, eframe/egui 0.27, crossbeam-channel 0.5, serde_json, bincode 1.3, rfd 0.14
 - **Durum:** Kayıt (hotkey-filtreli, klavye/fare seçmeli) + kesilebilir oynatma (hız çarpanlı, takılı-tuş bırakmalı) + döngü + hotkey (tek tuş atanabilir) + dosya Save/Load + son-dosyalar + 9 dil + temiz kapanış çalışıyor. `cargo check` temiz, `cargo test` 16/16, release taze derlendi. Gerçek donanım testleri (hız, filtre, kapanış) manuel bekliyor — **her düzeltmeden sonra release da derlenmeli, kullanıcı release çalıştırıyor. Çalıştırma: `./run.sh`.**
 
@@ -13,7 +13,7 @@
 
 Kernel-seviyesi makro kaydedici/oynatıcı. 6 thread: UI (egui) → Dispatcher (kanal yönlendirici) → Recorder (`/dev/input` poll 1ms) / Player (`/dev/uinput` + `precise_sleep`) + Sync (Recording→Idle geçişinde `MacroRecording.events` kopyalar, 5ms poll) + Hotkey (`/dev/input` KEY dinler, 200ms debounce).
 Paylaşılan durum: `Arc<Mutex<AppState>>`, `Arc<Mutex<MacroRecording>>`, `Arc<Mutex<HotkeyConfig>>`, `Arc<Mutex<Vec<MacroEvent>>>` (player kopyası), `Arc<Mutex<u32>>` loop sayacı.
-Config: `~/.config/linux-tinytask/tinytask_config.json`. Varsayılan hotkey'ler `Ctrl+Alt+Shift+R/P/S` (evdev kodları 19/25/31).
+Config: `~/.config/pressplay/tinytask_config.json` (0.2.0 ilk çalışmada `~/.config/linux-tinytask/` otomatik taşınır). Varsayılan hotkey'ler `Ctrl+Alt+Shift+R/P/S` (evdev kodları 19/25/31).
 
 Dosya haritası:
 - `src/main.rs` — config load/save, dispatcher, sync, hotkey thread, spawn (kanal bufferları 50'ye çıkarıldı; Recorder'a player_events paylaşıldı)
@@ -59,12 +59,12 @@ Dosya haritası:
 cargo check
 cargo build --release   # kullanıcı bunu çalıştırıyor; düzeltmeden sonra ŞART
 ./run.sh                # display env'lerini koruyarak sudo+GUI (önerilen çalıştırma)
-# manuel eşdeğeri: sudo env "DISPLAY=$DISPLAY" "WAYLAND_DISPLAY=$WAYLAND_DISPLAY" "XDG_RUNTIME_DIR=$XDG_RUNTIME_DIR" ./target/release/linux-tinytask
+# manuel eşdeğeri: sudo env "DISPLAY=$DISPLAY" "WAYLAND_DISPLAY=$WAYLAND_DISPLAY" "XDG_RUNTIME_DIR=$XDG_RUNTIME_DIR" ./target/release/pressplay
 cargo test   # 16 test: roundtrip, filtre, hotkey/chord, recent, sleep, stop, tuş takibi, hız, i18n (4)
-./target/release/linux-tinytask
-RUST_LOG=debug ./target/release/linux-tinytask
+./target/release/pressplay
+RUST_LOG=debug ./target/release/pressplay
 ./build_appimage.sh
-ls -l /dev/uinput; groups $USER; cat ~/.config/linux-tinytask/tinytask_config.json
+ls -l /dev/uinput; groups $USER; cat ~/.config/pressplay/tinytask_config.json
 ```
 
 ## 6. Geçmiş (her işlemde satır ekle)
@@ -87,3 +87,4 @@ ls -l /dev/uinput; groups $USER; cat ~/.config/linux-tinytask/tinytask_config.js
 | 2026-09-11 | Varsayılan İngilizce + kalan Türkçe temizliği | `Lang::default` ve config varsayılanı `"en"` oldu. UI dışı ama kullanıcıya görünen tüm metinler İngilizce'ye çevrildi: models dosya-hata mesajları (durum satırında görünüyordu), "keys released" durum mesajı, tüm info/warn/error logları (main/player/recorder/ui) + test mesajları. Kod içi yorumlar Türkçe bırakıldı (geliştiriciye yönelik). `cargo test` 11/11, release 13:40. NOT: kayıtlı config'de `lang:"tr"` varsa dil Türkçe kalır — Ayarlar'dan bir kez değiştirilmeli veya config silinmeli |
 | 2026-09-11 | Yazar adı Luna → TheBottle2 | `Cargo.toml` authors + 9 dilde Hakkında/About imzası değiştirildi. `cargo test` 11/11, release yenilendi, push edildi |
 | 2026-09-11 | 5'li özellik paketi | (1) Hız çarpanı 0.25x–4x (`SetSpeedMultiplier`, delay + loop-gap ölçeklenir, kelepçeli, testli). (2) Hotkey filtreleme: tetik tuşu + chord modifier'ları kayda alınmaz (basılı-takip + baskılama seti + geriye dönük buffer temizliği, testli). (3) Temiz kapanış: `process::exit` kalktı, Quit yayılımı + join sırası (hotkey→sync→dispatcher→recorder→player), hotkey/sync shutdown bayraklı; headless duman testi UI pencere açtığı için yapılamadı, manuel bekliyor. (4) Son dosyalar: config'de max 8, Makrolar sekmesinde tek-tık yükleme (eksik dosya gri). (5) Kayıt filtresi: klavye/fare onay kutuları (çift taraflı kelepçe). i18n'e 7 anahtar × 9 dil. `cargo test` 16/16, warning yok, release derlendi |
+| 2026-09-11 | Rebrand: linux-tinytask → pressplay (v0.2.0) | Gerekçe: TinyTask marka benzerliği riski; repo zaten pressplay idi. Değişiklikler: Cargo paketi+binary, `.desktop` (git mv ile `pressplay.desktop`, Name/Exec/Icon), scriptler (install legacy `linux-tinytask` artıklarını temizler + eski udev kuralını siler), UI başlık/pencere/About (`CARGO_PKG_VERSION`), uinput cihaz adı, dialog filtresi, config `~/.config/pressplay/` + ilk çalışmada otomatik taşıma, README (başlık + "not affiliated" disclaimer). `cargo test` 16/16, release `target/release/pressplay` derlendi |

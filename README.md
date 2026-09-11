@@ -217,7 +217,4 @@ Honest list for the current code (details in `HANDOFF.md`):
 | `Virtual device creation failed` | No `uinput` access → `install.sh` (udev rule) or run as root; check `ls -l /dev/uinput` |
 | `No events to play!` | Recording empty → record first or load a file from the Macros tab (unsaved recordings reset on restart) |
 | Hotkey not working | Another app may swallow the key; watch pressed codes with `RUST_LOG=debug` |
-| Not working on Wayland | It's a permission issue, not display-server related — check groups |
-
-## 📄 License
-MIT — see `LICENSE`.
+| "Does it work on Wayland?" | Yes — the app reads the kernel directly (`/dev/input`), bypassing the compositor entirely. If it fails on Wayland, it's a permission issue (see above), not a Wayland issue |

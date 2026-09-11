@@ -21,6 +21,9 @@ pub struct TinyTaskApp {
     current_tab: usize,
     loop_count: u32,
     infinite_loop: bool,
+    speed: f32,
+    rec_keyboard: bool,
+    rec_mouse: bool,
     assigning_hotkey: Option<HotkeyAction>,
     key_capture_active: bool,
     hotkey_msg: String,
@@ -49,6 +52,9 @@ impl TinyTaskApp {
             current_tab: 0,
             loop_count: 1,
             infinite_loop: false,
+            speed: 1.0,
+            rec_keyboard: true,
+            rec_mouse: true,
             assigning_hotkey: None,
             key_capture_active: false,
             hotkey_msg: String::new(),
@@ -204,6 +210,40 @@ impl TinyTaskApp {
             self.cmd_tx.send(Command::SetLoopCount(count)).ok();
         }
 
+        ui.add_space(5.0);
+
+        // Kayıt filtresi: en az biri açık kalmalı
+        let (rec_keyboard, rec_mouse) = (self.tr("rec_keyboard"), self.tr("rec_mouse"));
+        let filter_before = (self.rec_keyboard, self.rec_mouse);
+        ui.horizontal(|ui| {
+            ui.checkbox(&mut self.rec_keyboard, rec_keyboard);
+            ui.checkbox(&mut self.rec_mouse, rec_mouse);
+        });
+        if (self.rec_keyboard, self.rec_mouse) != filter_before {
+            if !self.rec_keyboard && !self.rec_mouse {
+                self.rec_keyboard = true; // ikisi birden kapanamaz
+            }
+            self.cmd_tx
+                .send(Command::SetRecordFilter {
+                    keyboard: self.rec_keyboard,
+                    mouse: self.rec_mouse,
+                })
+                .ok();
+        }
+
+        ui.add_space(5.0);
+
+        // Oynatma hızı
+        let (speed_label, speed_apply) = (self.tr("speed_label"), self.tr("speed_apply"));
+        ui.horizontal(|ui| {
+            ui.label(speed_label);
+            ui.add(egui::Slider::new(&mut self.speed, 0.25..=4.0).text("x"));
+            ui.label(format!("{:.2}x", self.speed));
+        });
+        if ui.button(speed_apply).clicked() {
+            self.cmd_tx.send(Command::SetSpeedMultiplier(self.speed)).ok();
+        }
+
         ui.add_space(10.0);
         ui.separator();
 
@@ -324,6 +364,33 @@ impl TinyTaskApp {
         ui.label(self.tr("macros_fmt2"));
         if count == 0 {
             ui.colored_label(egui::Color32::YELLOW, self.tr("macros_empty"));
+        }
+
+        ui.add_space(10.0);
+        ui.separator();
+        ui.label(self.tr("recent_title"));
+        {
+            let recent = self.hotkey_config.lock().unwrap().recent_files.clone();
+            if recent.is_empty() {
+                ui.label(self.tr("recent_empty"));
+            } else {
+                let missing = self.tr("recent_missing");
+                for path in &recent {
+                    let file_name = std::path::Path::new(path)
+                        .file_name()
+                        .map(|n| n.to_string_lossy().to_string())
+                        .unwrap_or_else(|| path.clone());
+                    let exists = std::path::Path::new(path).exists();
+                    let label = if exists {
+                        file_name
+                    } else {
+                        format!("{} {}", file_name, missing)
+                    };
+                    if ui.add_enabled(exists, egui::Button::new(label)).clicked() {
+                        self.cmd_tx.send(Command::LoadMacro(path.clone())).ok();
+                    }
+                }
+            }
         }
     }
 

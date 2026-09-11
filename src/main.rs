@@ -7,7 +7,7 @@ mod ui;
 use crossbeam_channel::bounded;
 use i18n::Lang;
 use log::{info, warn};
-use models::{AppState, Command, HotkeyConfig, MacroEvent, MacroRecording};
+use models::{AppState, Command, HotkeyConfig, MacroEvent, MacroRecording, RecordFilter};
 use player::Player;
 use recorder::Recorder;
 use std::fs;
@@ -57,6 +57,10 @@ fn main() {
     let recording_for_player: Arc<Mutex<Vec<MacroEvent>>> = Arc::new(Mutex::new(Vec::new()));
     // UI <-> Player arası paylaşılan acil-stop bayrağı (kanaldan bağımsız)
     let stop_flag = Arc::new(AtomicBool::new(false));
+    // Kapanış bayrağı: sync + hotkey thread'leri bunu yoklar
+    let shutdown = Arc::new(AtomicBool::new(false));
+    // Klavye/fare kayıt filtresi (recorder'la paylaşılır)
+    let record_filter = Arc::new(Mutex::new(RecordFilter::default()));
 
     // UI -> Dispatcher channel (tek channel, dispatcher yönlendirir)
     let (cmd_tx, cmd_rx_dispatcher) = bounded::<Command>(50);
@@ -64,27 +68,32 @@ fn main() {
     // Dispatcher -> Recorder/Player channels (Save/Load path'leri uzun olabilir, buffer geniş)
     let (cmd_tx_recorder, cmd_rx_recorder) = bounded::<Command>(50);
     let (cmd_tx_player, cmd_rx_player) = bounded::<Command>(50);
+    // Kapanışta Quit göndermek için yedek tutulur (asıllar dispatcher'a taşınır)
+    let quit_recorder = cmd_tx_recorder.clone();
+    let quit_player = cmd_tx_player.clone();
 
     let (event_tx, event_rx) = bounded::<String>(50);
 
     // Dispatcher thread: komutları doğru thread'lere yönlendirir.
     // try_send kullanılır: hedef kanal dolu olsa bile dispatcher kilitlenmez,
     // acil stop komutları gecikmez (stop bayrağı ayrıca anında iletilir).
-    std::thread::spawn(move || {
+    let dispatcher_handle = std::thread::spawn(move || {
         info!("Dispatcher thread started");
         for cmd in cmd_rx_dispatcher {
             match &cmd {
                 Command::StartRecording
                 | Command::StopRecording
                 | Command::SaveMacro(_)
-                | Command::LoadMacro(_) => {
+                | Command::LoadMacro(_)
+                | Command::SetRecordFilter { .. } => {
                     if cmd_tx_recorder.try_send(cmd).is_err() {
                         warn!("Recorder channel full, command dropped");
                     }
                 }
                 Command::StartPlayback
                 | Command::StopPlayback
-                | Command::SetLoopCount(_) => {
+                | Command::SetLoopCount(_)
+                | Command::SetSpeedMultiplier(_) => {
                     if cmd_tx_player.try_send(cmd).is_err() {
                         warn!("Player channel full, command dropped");
                     }
@@ -106,12 +115,16 @@ fn main() {
     let recorder_state = state.clone();
     let recorder_recording = recording.clone();
     let recorder_player_events = recording_for_player.clone();
+    let recorder_hotkeys = hotkey_config.clone();
+    let recorder_filter = record_filter.clone();
     let event_tx_rec = event_tx.clone();
-    std::thread::spawn(move || {
+    let recorder_handle = std::thread::spawn(move || {
         let recorder = Recorder::new(
             recorder_state,
             recorder_recording,
             recorder_player_events,
+            recorder_hotkeys,
+            recorder_filter,
             cmd_rx_recorder,
             event_tx_rec,
         );
@@ -123,7 +136,7 @@ fn main() {
     let event_tx_play = event_tx.clone();
     let recording_for_player_for_closure = recording_for_player.clone();
     let player_stop_flag = stop_flag.clone();
-    std::thread::spawn(move || {
+    let player_handle = std::thread::spawn(move || {
         let player = Player::new(
             player_state,
             recording_for_player_for_closure,
@@ -138,9 +151,10 @@ fn main() {
     let sync_state = state.clone();
     let sync_recording = recording.clone();
     let sync_player_events = recording_for_player.clone();
-    std::thread::spawn(move || {
+    let sync_shutdown = shutdown.clone();
+    let sync_handle = std::thread::spawn(move || {
         let mut last_state = AppState::Idle;
-        loop {
+        while !sync_shutdown.load(Ordering::Relaxed) {
             let current_state = *sync_state.lock().unwrap();
 
             if last_state == AppState::Recording && current_state == AppState::Idle {
@@ -153,6 +167,7 @@ fn main() {
             last_state = current_state;
             std::thread::sleep(std::time::Duration::from_millis(5));
         }
+        info!("Sync thread stopped");
     });
 
     // Hotkey thread (stop hotkey'i bayrağı da set eder: kanal gecikmesiz acil stop)
@@ -160,21 +175,37 @@ fn main() {
     let hotkey_state = state.clone();
     let hotkey_config_clone = hotkey_config.clone();
     let hotkey_stop_flag = stop_flag.clone();
-    std::thread::spawn(move || {
+    let hotkey_shutdown = shutdown.clone();
+    let hotkey_handle = std::thread::spawn(move || {
         run_hotkey_thread(
             hotkey_state,
             cmd_tx_hotkey,
             hotkey_config_clone,
             hotkey_stop_flag,
+            hotkey_shutdown,
         );
     });
 
     info!("Starting UI...");
     let lang = Lang::from_code(&hotkey_config.lock().unwrap().lang).unwrap_or_default();
-    ui::run_ui(state, recording, hotkey_config, cmd_tx, event_rx, stop_flag, lang);
+    let cmd_tx_ui = cmd_tx.clone();
+    ui::run_ui(state, recording, hotkey_config, cmd_tx_ui, event_rx, stop_flag, lang);
 
+    // Temiz kapanış: pencere kapandı -> önce poll-thread'leri durdur
+    // (kanalları tutan tek klonlar onlarda), sonra Quit yay + birleş.
     info!("Shutting down...");
-    std::process::exit(0);
+    shutdown.store(true, Ordering::Relaxed);
+    hotkey_handle.join().ok();
+    sync_handle.join().ok();
+    // cmd_tx (UI/hotkey klonları) artık düşmüş olmalı -> dispatcher kanalı kapanır
+    drop(cmd_tx);
+    dispatcher_handle.join().ok();
+    // Recorder/Player'a doğrudan Quit (dispatcher zaten kapalı olabilir)
+    quit_recorder.try_send(Command::Quit).ok();
+    quit_player.try_send(Command::Quit).ok();
+    recorder_handle.join().ok();
+    player_handle.join().ok();
+    info!("All threads stopped. Bye!");
 }
 
 fn run_hotkey_thread(
@@ -182,6 +213,7 @@ fn run_hotkey_thread(
     cmd_tx: crossbeam_channel::Sender<Command>,
     hotkey_config: Arc<Mutex<HotkeyConfig>>,
     stop_flag: Arc<AtomicBool>,
+    shutdown: Arc<AtomicBool>,
 ) {
     use evdev::{Device, EventType};
     use nix::poll::{poll, PollFd, PollFlags, PollTimeout};
@@ -213,7 +245,12 @@ fn run_hotkey_thread(
     let mut pressed_keys: HashSet<u16> = HashSet::new();
     let mut last_trigger_time = std::time::Instant::now();
 
-    loop {
+    while !shutdown.load(Ordering::Relaxed) {
+        if devices.is_empty() {
+            // Cihaz yoksa poll boş fd ile busy-loop'a girer; sakin bekle
+            std::thread::sleep(std::time::Duration::from_millis(100));
+            continue;
+        }
         let mut fds: Vec<PollFd> = devices
             .iter()
             .map(|dev| unsafe {
@@ -280,4 +317,5 @@ fn run_hotkey_thread(
             }
         }
     }
+    info!("Hotkey thread stopped");
 }

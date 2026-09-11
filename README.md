@@ -31,9 +31,12 @@ cargo build --release
 - **Precise timing**: deadline-based, interruptible `precise_sleep_interruptible` (busy-wait under 100µs, chunked 2ms sleep + 800µs spin above), waiting `timestamp_us` deltas per event
 - **Emergency stop**: `AtomicBool` stop flag checked before every event and ~every 1ms inside sleep; `StopPlayback` halts emission instantly, **auto-releases stuck keys** (no more broken keyboard/mouse from a wedged Ctrl) and returns to Idle (with in-playback channel polling)
 - **Macro files**: save/load in `.tts` (bincode, small/fast) and `.json` (readable/debug) formats; versioned `MacroFile` wrapper, path-traversal protected
-- **Macro panel**: quick Save/Load in the Kontrol (Control) tab + a dedicated `Makrolar` (Macros) tab (name, duration, event count, date)
+- **Macro panel**: quick Save/Load in the Control tab + a dedicated Macros tab (name, duration, event count, date)
 - **Duration display**: `duration_us` computed on record, shown in the UI as `12.34s / 850ms / 400µs`
 - **Loop mode**: 1–9999 repeats or infinite loop (`0 = infinite`), 50ms gap between loops
+- **Playback speed**: 0.25x–4x multiplier applied to event delays and loop gaps (Control tab slider + Apply)
+- **Record filter**: capture keyboard-only or mouse-only (Control tab checkboxes, at least one stays on)
+- **Recent files**: last 8 macros in the Macros tab, one-click load (missing files shown greyed out)
 - **Global hotkeys**: system-wide shortcuts for record/play/stop (dedicated hotkey thread)
 - **Config persistence**: hotkey configuration stored as JSON in `~/.config/linux-tinytask/tinytask_config.json`
 - **Minimalist UI**: `eframe/egui`, always-on-top, 420x480, tabbed interface
@@ -74,7 +77,7 @@ linux-tinytask/
 │   ├── i18n.rs      # Built-in translations (9 languages) + completeness tests
 │   ├── recorder.rs  # /dev/input enumeration + poll + recording (all events except SYN)
 │   ├── player.rs    # uinput virtual device + precise_sleep_interruptible + loop playback
-│   └── ui.rs        # eframe/egui tabs: Kontrol / Makrolar / Ayarlar / Hakkında
+│   └── ui.rs        # eframe/egui tabs (Control / Macros / Settings / About, 9 languages)
 ├── Cargo.toml
 ├── Cargo.lock
 ├── LICENSE
@@ -163,10 +166,12 @@ sudo env "DISPLAY=$DISPLAY" "WAYLAND_DISPLAY=$WAYLAND_DISPLAY" \
 ## 🖥️ Usage
 
 1. Launch the app (window stays on top).
-2. **Kontrol** (Control) tab → `● Kaydet` (Record) (or `Ctrl+Alt+Shift+R`) → do your actions → `■ Durdur` (Stop).
-3. Loop setting: check `Sonsuz döngü` (Infinite loop) or pick `1–9999` (`kez` = times) → `Döngü Ayarını Uygula` (Apply Loop Setting) (default is `1` if never applied).
-4. `▶ Oynat` (Play) (or `Ctrl+Alt+Shift+P`) → to stop, press **either** `■ Durdur` (Stop) button while playing (or `Ctrl+Alt+Shift+S`). Stopping cuts emission instantly via a shared atomic flag, independent of channel latency.
-5. The status line and event counter (`Kaydedilen event`) show the current state.
+2. **Control** tab → `● Record` (or `Ctrl+Alt+Shift+R`) → do your actions → `■ Stop`.
+3. Loop setting: check `Infinite loop` or pick `1–9999` → `Apply Loop Setting` (default is `1` if never applied).
+4. `▶ Play` (or `Ctrl+Alt+Shift+P`) → to stop, press **either** `■ Stop` button while playing (or `Ctrl+Alt+Shift+S`). Stopping cuts emission instantly via a shared atomic flag, independent of channel latency.
+5. The status line and event counter (`Recorded events`) show the current state.
+
+Optional per session: tick `Keyboard`/`Mouse` in the Control tab to record only one device class; set `Speed` (0.25x–4x) + `Apply Speed` to replay faster/slower. Hotkey presses (e.g. the stop key) are automatically excluded from recordings.
 
 ### Config File
 Path: `~/.config/linux-tinytask/tinytask_config.json`
@@ -181,10 +186,10 @@ Example:
 Key codes are Linux evdev codes (19=R, 25=P, 31=S, 1=Esc, 57=Space, 66=F8, … — full list in `models.rs`).
 
 ### Macro Files
-- Use `💾 Kaydet` (Save) / `📂 Yükle` (Load) in the Kontrol (Control) tab or the `Makrolar` (Macros) tab (`rfd` native dialog).
+- Use `💾 Save` / `📂 Load` in the Control tab or the Macros tab (`rfd` native dialog).
 - Format by extension: `.json` → human-readable JSON, `.tts` (or other) → `bincode` binary (small/fast).
 - File layout: `MacroFile { version: 1, name, created_at, duration_us, event_count, events }`. File IO happens in the recorder thread (UI never blocks); a loaded macro is instantly synced to the player copy.
-- Tests: `cargo test` (7 tests: json/binary roundtrip, path-traversal rejection, single-key matching, sleep accuracy, stop responsiveness, key tracking).
+- Tests: `cargo test` (16 tests: roundtrips, filters, hotkey/chord logic, recent list, sleep accuracy, stop responsiveness, key tracking, i18n completeness).
 
 ## ⚠️ Known Limitations
 
@@ -192,38 +197,41 @@ Honest list for the current code (details in `HANDOFF.md`):
 
 1. **No ABS (absolute) axis playback**: the recorder captures `ABS` events but the `player.rs` virtual device only exposes keys + `REL_X/Y/WHEEL/HWHEEL`. Graphics-tablet/touchscreen absolute positions can't be replayed.
 2. **Fragile sync thread**: detects the `Recording → Idle` transition by polling every 5ms; races possible on fast toggles or empty recordings.
-3. **Unclean shutdown**: UI close calls `std::process::exit(0)`; no `Quit` propagation to threads. (In-playback Quit is handled inside the player.)
-4. **Hotkey thread never exits**: infinite `loop`, doesn't listen for `Quit`; filters power/video/lid but still listens to all keyboards.
-5. **Hotkey presses leak into recordings**: keys pressed for hotkeys aren't filtered from the recording (start recording via the UI button to avoid this).
+3. **Hotkey-filter edge case**: the trigger key and its chord modifiers are stripped from recordings, but a modifier held since *before* recording started can be stripped too if it completes a hotkey chord (rare; its release is still suppressed, so no stuck keys).
 
 ## 🛣️ Roadmap
 - [x] Macro save/load (JSON + bincode): file dialog + `SaveMacro/LoadMacro` implementation
 - [x] Emergency stop + timing fix (interruptible sleep, in-playback channel polling)
 - [x] Duration computation + UI display
-- [x] Macro management panel (Makrolar tab)
-- [x] Hotkey assignment (incl. single key: Ayarlar → Değiştir → press key; saved to disk)
+- [x] Macro management panel (Macros tab)
+- [x] Hotkey assignment (incl. single key: Settings → Change → press key; saved to disk)
 - [x] Auto-release stuck keys on stop/finish (broken keyboard/mouse fix)
 - [x] One-command install (`install.sh`) with menu entry
 - [x] Multilingual UI (9 Latin-script languages, persisted)
+- [x] Clean shutdown (`Quit` propagation to all threads, `join`, no `process::exit`)
+- [x] Hotkey-press filtering (trigger key + chord modifiers stripped from recordings)
+- [x] Playback speed multiplier (0.25x–4x)
+- [x] Record filter (keyboard/mouse toggles) + recent-files list
 - [ ] More UI languages (Russian/Chinese/Arabic need a bundled custom font — embedded Ubuntu-Light has no Cyrillic/CJK)
 - [ ] ABS axis + `REL_Z` etc. virtual-device extension
-- [ ] Clean shutdown (`Quit` propagation, remove `process::exit`)
-- [ ] Filter hotkey presses out of recordings
-- [ ] Playback speed multiplier, latency tuning
+- [ ] Playback latency tuning (per-event `emit` batching for ultra-dense macros)
 
 ## 🧪 Test Scenarios
 1. **Stop**: record a 10s macro → play → stop at 2s. Expected: emission stops instantly, remaining events never play, state returns to Idle. (Manual: needs `/dev/input`+`uinput` access on a real machine.)
 2. **Timing**: play a 5s macro → total playback should be 5s ±50ms. Note: pre-first-event waiting is part of the recording by design.
 3. **Loop stop**: stop during infinite loop → no new loop starts, `Playback stopped` in log.
-4. **Save/Load**: record → save to file → restart app → load → play. Automated: `cargo test` (7 tests passing, small roundtrips).
+4. **Save/Load**: record → save to file → restart app → load → play. Automated: `cargo test` (16 tests passing, small roundtrips).
 5. **Large macro**: record ~10,000 events → save/load/play. Must be verified manually (unit tests only cover small samples).
+6. **Speed**: play the same macro at 1x and 2x → 2x run should take ~half the time (±10%).
+7. **Hotkey filter**: assign single-key `F8` as stop, record via UI button, press `F8` mid-recording → saved macro must not contain F8.
+8. **Shutdown**: close the window → process must exit on its own within ~1s (no kill needed); check terminal for `All threads stopped`.
 
 ## 🐛 Troubleshooting
 | Symptom | Cause / Fix |
 |---|---|
 | `Cannot read /dev/input` | Not in `input` group → `usermod -a -G input $USER` + relogin (or run `install.sh`) |
 | `Virtual device creation failed` | No `uinput` access → `install.sh` (udev rule) or run as root; check `ls -l /dev/uinput` |
-| `No events to play!` | Recording empty → record first or load a file from the Makrolar (Macros) tab (unsaved recordings reset on restart) |
+| `No events to play!` | Recording empty → record first or load a file from the Macros tab (unsaved recordings reset on restart) |
 | Hotkey not working | Another app may swallow the key; watch pressed codes with `RUST_LOG=debug` |
 | "Does it work on Wayland?" | Yes — the app reads the kernel directly (`/dev/input`), bypassing the compositor entirely. If it fails on Wayland, it's a permission issue (see above), not a Wayland issue |
 | Menu entry does nothing | `~/.local/bin` may not be in PATH or groups need relogin → log out/in, then check `which linux-tinytask` |

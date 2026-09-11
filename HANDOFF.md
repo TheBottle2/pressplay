@@ -7,7 +7,7 @@
 - **Son Güncelleme:** 2026-09-09
 - **Proje:** linux-tinytask v0.1.0 (`/mnt/harddisk/my_apps/linux-tinytask`)
 - **Dil/Stack:** Rust 2021, evdev 0.12, nix 0.28, eframe/egui 0.27, crossbeam-channel 0.5, serde_json, bincode 1.3, rfd 0.14
-- **Durum:** Kayıt + kesilebilir oynatma (takılı-tuş bırakmalı) + döngü + hotkey (tek tuş atanabilir) + dosya Save/Load + Makrolar sekmesi çalışıyor. `cargo check` temiz (warning kalmadı), `cargo test` 7/7 + `cargo build --release` (23:46) geçiyor. Gerçek donanım durdurma/zamanlama testi `/dev/input`+`uinput` izinli makinede manuel yapılmalı — **önemli: her düzeltmeden sonra release da derlenmeli (`cargo build --release`), kullanıcı release çalıştırıyor. Çalıştırma: `./run.sh` (display env'li sudo).**
+- **Durum:** Kayıt (hotkey-filtreli, klavye/fare seçmeli) + kesilebilir oynatma (hız çarpanlı, takılı-tuş bırakmalı) + döngü + hotkey (tek tuş atanabilir) + dosya Save/Load + son-dosyalar + 9 dil + temiz kapanış çalışıyor. `cargo check` temiz, `cargo test` 16/16, release taze derlendi. Gerçek donanım testleri (hız, filtre, kapanış) manuel bekliyor — **her düzeltmeden sonra release da derlenmeli, kullanıcı release çalıştırıyor. Çalıştırma: `./run.sh`.**
 
 ## 1. Sistem Özeti (kısa)
 
@@ -38,11 +38,10 @@ Dosya haritası:
 
 1. Player ABS desteklemez (`player.rs` sanal cihaz); recorder ABS kaydeder → tablet/touch mutlak konum oynatılamaz.
 2. Sync thread yarışa açık (`main.rs` 5ms poll); Load sonrası sync recorder içinde manuel yapılıyor ama kayıt-yarışı sürüyor.
-3. Sert kapanış: `main.rs process::exit(0)`; Player içi Quit düzeltildi ama global shutdown + hotkey thread çıkışı yok.
-4. Hotkey tuşları kayda karışır (filtre yok). Tek-tuş hotkey atanırsa bu daha görünür olur (örn. F8'e basınca kayda F8 girer).
-5. `.desktop` Icon düzeltildi (`linux-tinytask`); **MIT `LICENSE` eklendi** (README güncellendi).
-6. Zamanlama notu: `device.emit` event başına 1 syscall; ultra-yoğun makrolarda batch/SYN optimizasyonu gerekebilir. İlk-event-öncesi bekleme kayda dahil (tasarım).
-7. egui Super tuşunu bildirmez → Super'li kombo yakalanamaz (mevcut Super'li config çalışmaya devam eder).
+3. Hotkey-filtre kenar durumu: tetik tuşu + chord modifier'ları kayıttan ayıklanır, ama kayda *başlamadan önce* basılı tutulan bir modifier da chord'u tamamlarsa ayıklanabilir (nadir; release baskılı olduğu için takılı tuş oluşmaz).
+4. Zamanlama notu: `device.emit` event başına 1 syscall; ultra-yoğun makrolarda batch/SYN optimizasyonu gerekebilir. İlk-event-öncesi bekleme kayda dahil (tasarım).
+5. egui Super tuşunu bildirmez → Super'li kombo yakalanamaz (mevcut Super'li config çalışmaya devam eder).
+6. Kapanış duman testi headless yapılamadı (ortamda display var, UI pencere açıp bekliyor) — gerçek kapatma testi kullanıcıda: pencereyi kapatınca ~1sn içinde `All threads stopped` ile çıkmalı.
 
 ## 4. Sonraki Adımlar (önerilen sıra)
 
@@ -50,11 +49,9 @@ Dosya haritası:
 - [x] Acil stop + zamanlama + süre gösterimi + Makrolar sekmesi (2026-09-09 yapıldı)
 - [x] Ölü stop butonu düzeltmesi + paylaşılan stop bayrağı + release derleme (2026-09-09)
 - [x] Takılı-tuş bırakma (stop/finish) + tek-tuş dahil hotkey yakalama (2026-09-09)
+- [x] 5'li paket (2026-09-11): hız çarpanı + hotkey filtreleme + temiz kapanış + son dosyalar + kayıt filtresi
 - [ ] Player'a ABS eksen ekleme
-- [ ] Düzgün shutdown (Quit yayılımı, exit kaldırma, hotkey thread çıkışı)
-- [ ] Kayıt sırasında hotkey tuşlarını filtreleme
-- [ ] `.desktop` Icon + lisans
-- [ ] Manuel donanım testleri: durdurma (10sn→2.sn stop), zamanlama (5sn ±50ms), sonsuz loop stop, 10k event Save/Load/Play
+- [ ] Manuel donanım testleri: hız (1x/2x), hotkey filtresi (F8), kapanış (`All threads stopped`), 10k event Save/Load/Play
 
 ## 5. Faydalı Komutlar
 
@@ -63,7 +60,7 @@ cargo check
 cargo build --release   # kullanıcı bunu çalıştırıyor; düzeltmeden sonra ŞART
 ./run.sh                # display env'lerini koruyarak sudo+GUI (önerilen çalıştırma)
 # manuel eşdeğeri: sudo env "DISPLAY=$DISPLAY" "WAYLAND_DISPLAY=$WAYLAND_DISPLAY" "XDG_RUNTIME_DIR=$XDG_RUNTIME_DIR" ./target/release/linux-tinytask
-cargo test   # 7 test: json/binary roundtrip, path-traversal reddi, tek-tuş eşleşme, sleep doğruluğu, stop tepkisi, tuş takibi
+cargo test   # 16 test: roundtrip, filtre, hotkey/chord, recent, sleep, stop, tuş takibi, hız, i18n (4)
 ./target/release/linux-tinytask
 RUST_LOG=debug ./target/release/linux-tinytask
 ./build_appimage.sh
@@ -89,3 +86,4 @@ ls -l /dev/uinput; groups $USER; cat ~/.config/linux-tinytask/tinytask_config.js
 | 2026-09-11 | Çok dilli arayüz (9 dil) | Yeni `src/i18n.rs`: en/tr/de/fr/es/pt/it/nl/pl (~54 anahtar), `Lang` enum + `t()` + geri dönüş (önce İngilizce, sonra anahtarın kendisi). Neden sadece Latin: gömülü Ubuntu-Light'ta Kiril yok (font cmap'tan kodla doğrulandı) → ru/zh/ar yol haritasında. `HotkeyConfig.lang` (serde default "tr", eski configler açılır), Ayarlar'da dil seçici (ComboBox, diske kaydedilir), "varsayılana dön" dili korur. `cargo test` 11/11 (4 yeni i18n testi: bütünlük, placeholder, from_code, fallback), warning sıfırlandı, release 13:31 derlendi |
 | 2026-09-11 | Varsayılan İngilizce + kalan Türkçe temizliği | `Lang::default` ve config varsayılanı `"en"` oldu. UI dışı ama kullanıcıya görünen tüm metinler İngilizce'ye çevrildi: models dosya-hata mesajları (durum satırında görünüyordu), "keys released" durum mesajı, tüm info/warn/error logları (main/player/recorder/ui) + test mesajları. Kod içi yorumlar Türkçe bırakıldı (geliştiriciye yönelik). `cargo test` 11/11, release 13:40. NOT: kayıtlı config'de `lang:"tr"` varsa dil Türkçe kalır — Ayarlar'dan bir kez değiştirilmeli veya config silinmeli |
 | 2026-09-11 | Yazar adı Luna → TheBottle2 | `Cargo.toml` authors + 9 dilde Hakkında/About imzası değiştirildi. `cargo test` 11/11, release yenilendi, push edildi |
+| 2026-09-11 | 5'li özellik paketi | (1) Hız çarpanı 0.25x–4x (`SetSpeedMultiplier`, delay + loop-gap ölçeklenir, kelepçeli, testli). (2) Hotkey filtreleme: tetik tuşu + chord modifier'ları kayda alınmaz (basılı-takip + baskılama seti + geriye dönük buffer temizliği, testli). (3) Temiz kapanış: `process::exit` kalktı, Quit yayılımı + join sırası (hotkey→sync→dispatcher→recorder→player), hotkey/sync shutdown bayraklı; headless duman testi UI pencere açtığı için yapılamadı, manuel bekliyor. (4) Son dosyalar: config'de max 8, Makrolar sekmesinde tek-tık yükleme (eksik dosya gri). (5) Kayıt filtresi: klavye/fare onay kutuları (çift taraflı kelepçe). i18n'e 7 anahtar × 9 dil. `cargo test` 16/16, warning yok, release derlendi |

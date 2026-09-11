@@ -1,8 +1,11 @@
-use crate::models::{AppState, Command, MacroEvent, MacroRecording};
+use crate::models::{
+    hotkey_action_for, record_filter_allows, chord_modifier_codes, AppState, Command,
+    HotkeyAction, HotkeyConfig, MacroEvent, MacroRecording, RecordFilter,
+};
 use crossbeam_channel::{Receiver, Sender};
 use evdev::{Device, EventType};
 use log::{debug, error, info};
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 use std::fs;
 use std::os::unix::io::{AsRawFd, BorrowedFd};
 use std::path::PathBuf;
@@ -15,6 +18,10 @@ pub struct Recorder {
     /// Player'ın okuduğu event kopyası — LoadMacro sonrası senkronizasyon için.
     /// (Sync thread sadece Recording→Idle geçişinde kopyalar, Load'da geçiş olmaz.)
     player_events: Arc<Mutex<Vec<MacroEvent>>>,
+    /// Hotkey eşleşmesi için basılı-tuş takibinde okunur; recent listesi için yazılır.
+    hotkey_config: Arc<Mutex<HotkeyConfig>>,
+    /// Klavye/fare kayıt filtresi (UI'dan SetRecordFilter ile).
+    filter: Arc<Mutex<RecordFilter>>,
     cmd_rx: Receiver<Command>,
     event_tx: Sender<String>,
 }
@@ -24,6 +31,8 @@ impl Recorder {
         state: Arc<Mutex<AppState>>,
         recording: Arc<Mutex<MacroRecording>>,
         player_events: Arc<Mutex<Vec<MacroEvent>>>,
+        hotkey_config: Arc<Mutex<HotkeyConfig>>,
+        filter: Arc<Mutex<RecordFilter>>,
         cmd_rx: Receiver<Command>,
         event_tx: Sender<String>,
     ) -> Self {
@@ -31,9 +40,18 @@ impl Recorder {
             state,
             recording,
             player_events,
+            hotkey_config,
+            filter,
             cmd_rx,
             event_tx,
         }
+    }
+
+    /// Başarılı Save/Load sonrası recent listesini günceller + diske yazar.
+    fn note_recent(&self, path: &str) {
+        let mut cfg = self.hotkey_config.lock().unwrap();
+        HotkeyConfig::push_recent(&mut cfg.recent_files, path);
+        crate::save_config(&cfg);
     }
 
     fn enumerate_input_devices() -> Vec<PathBuf> {
@@ -97,6 +115,9 @@ impl Recorder {
         let mut recording_active = false;
         let mut start_time = SystemTime::now();
         let mut local_buffer: Vec<MacroEvent> = Vec::with_capacity(10_000);
+        // Hotkey eşleşmesi için basılı tuşlar; baskılanan (kayda alınmayan) tuşlar.
+        let mut pressed: HashSet<u16> = HashSet::new();
+        let mut suppressed: HashSet<u16> = HashSet::new();
 
         info!("Recorder thread started. Watching {} devices.", devices.len());
 
@@ -109,6 +130,8 @@ impl Recorder {
                         recording_active = true;
                         start_time = SystemTime::now();
                         local_buffer.clear();
+                        pressed.clear();
+                        suppressed.clear();
                         *self.state.lock().unwrap() = AppState::Recording;
                         self.event_tx.send("Recording started".to_string()).ok();
                         info!("Recording started");
@@ -142,13 +165,14 @@ impl Recorder {
                         let result = {
                             let rec = self.recording.lock().unwrap();
                             if rec.events.is_empty() {
-                                Err("Kaydedilecek event yok!".to_string())
+                                Err("No events to record!".to_string())
                             } else {
                                 rec.save_to_file(&path)
                             }
                         };
                         match result {
                             Ok(()) => {
+                                self.note_recent(&path);
                                 self.event_tx
                                     .send(format!("Macro saved: {}", path))
                                     .ok();
@@ -178,6 +202,7 @@ impl Recorder {
                                     let mut pe = self.player_events.lock().unwrap();
                                     *pe = rec.events.clone();
                                 }
+                                self.note_recent(&path);
                                 self.event_tx
                                     .send(format!(
                                         "Macro loaded: {} ({} events, {})",
@@ -193,6 +218,16 @@ impl Recorder {
                                 error!("Macro load error: {}", e);
                             }
                         }
+                    }
+                    Command::SetRecordFilter { keyboard, mouse } => {
+                        // En az biri açık kalmalı (UI da kelepçeler; çift güvence)
+                        let (kb, m) = if keyboard || mouse {
+                            (keyboard, mouse)
+                        } else {
+                            (true, true)
+                        };
+                        *self.filter.lock().unwrap() = RecordFilter { keyboard: kb, mouse: m };
+                        info!("Record filter: keyboard={} mouse={}", kb, m);
                     }
                     Command::Quit => {
                         info!("Recorder thread stopping");
@@ -233,11 +268,60 @@ impl Recorder {
                                             continue;
                                         }
 
+                                        let code = event.code();
+                                        let value = event.value();
+                                        let etype = event.event_type();
+
+                                        // Basılı-tuş takibi (kayıt aktif olmasa da güncel tutulur)
+                                        if etype == EventType::KEY {
+                                            if value == 1 {
+                                                pressed.insert(code);
+                                                // Hotkey tetiklendi mi? Tetik tuşu + chord
+                                                // modifier'larını kayda alma.
+                                                let cfg = self.hotkey_config.lock().unwrap();
+                                                if let Some(action) =
+                                                    hotkey_action_for(&cfg, &pressed)
+                                                {
+                                                    let combo = match action {
+                                                        HotkeyAction::Record => &cfg.record,
+                                                        HotkeyAction::Play => &cfg.play,
+                                                        HotkeyAction::Stop => &cfg.stop,
+                                                    };
+                                                    suppressed.insert(code);
+                                                    let mods = chord_modifier_codes(combo);
+                                                    for m in &mods {
+                                                        suppressed.insert(*m);
+                                                    }
+                                                    // Chord basışları tetikten önce buffer'a
+                                                    // girmiştir; geriye dönük temizle.
+                                                    strip_unmatched_presses(&mut local_buffer, &mods);
+                                                }
+                                            } else if value == 0 {
+                                                pressed.remove(&code);
+                                                if suppressed.remove(&code) {
+                                                    // Basışı atlanan tuşun bırakılışı da atlanır
+                                                    continue;
+                                                }
+                                            }
+                                        }
+
                                         if recording_active {
+                                            // Baskılanmış hotkey tuşları kayda girmez
+                                            if etype == EventType::KEY && suppressed.contains(&code)
+                                            {
+                                                continue;
+                                            }
+                                            // Klavye/fare filtresi
+                                            if !record_filter_allows(
+                                                &self.filter.lock().unwrap(),
+                                                etype.0,
+                                            ) {
+                                                continue;
+                                            }
                                             let macro_event =
                                                 MacroEvent::from_evdev(&event, start_time);
                                             local_buffer.push(macro_event);
-                                            debug!("Kaydedildi: {:?}", macro_event);
+                                            debug!("Recorded: {:?}", macro_event);
                                         }
                                     }
                                 }
@@ -249,6 +333,24 @@ impl Recorder {
                     error!("Poll error: {}", e);
                 }
             }
+        }
+    }
+}
+
+/// Chord modifier'larının karşılığı gelmemiş basışlarını buffer sonundan temizler.
+///
+/// Kullanıcı Ctrl+Alt+Shift basılı tutup tetik tuşuna bastığında modifier basışları
+/// zaten buffer'a girmiştir. Tetik anında sondan başa taranır, chord'a ait
+/// basışlar (value==1) çıkarılır; başka bir event'te durulur. Not: kayıt başından
+/// beri basılı tutulan meşru bir modifier da bu aralığa denk gelirse silinebilir
+/// (kenar durumu; bırakılışı zaten baskılandığı için takılı tuş oluşmaz).
+fn strip_unmatched_presses(buffer: &mut Vec<MacroEvent>, mods: &[u16]) {
+    use crate::models::EV_KEY;
+    while let Some(last) = buffer.last() {
+        if last.event_type == EV_KEY && last.value == 1 && mods.contains(&last.code) {
+            buffer.pop();
+        } else {
+            break;
         }
     }
 }

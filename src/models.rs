@@ -213,6 +213,63 @@ mod tests {
         pressed.insert(29u16);
         assert!(!combo.matches(&pressed));
     }
+
+    #[test]
+    fn recent_list_dedupe_and_cap() {
+        let mut list = Vec::new();
+        HotkeyConfig::push_recent(&mut list, "/a/x.tts");
+        HotkeyConfig::push_recent(&mut list, "/a/y.tts");
+        HotkeyConfig::push_recent(&mut list, "/a/x.tts"); // başa taşınır, tekrar yok
+        assert_eq!(list, vec!["/a/x.tts".to_string(), "/a/y.tts".to_string()]);
+        for i in 0..20 {
+            HotkeyConfig::push_recent(&mut list, &format!("/a/{}.tts", i));
+        }
+        assert_eq!(list.len(), HotkeyConfig::RECENT_MAX);
+        assert_eq!(list[0], "/a/19.tts");
+    }
+
+    #[test]
+    fn record_filter_allows_types() {
+        let all = RecordFilter::default();
+        assert!(record_filter_allows(&all, EV_KEY));
+        assert!(record_filter_allows(&all, EV_REL));
+        assert!(record_filter_allows(&all, EV_ABS));
+        let no_mouse = RecordFilter { keyboard: true, mouse: false };
+        assert!(record_filter_allows(&no_mouse, EV_KEY));
+        assert!(!record_filter_allows(&no_mouse, EV_REL));
+        assert!(!record_filter_allows(&no_mouse, EV_ABS));
+        assert!(record_filter_allows(&no_mouse, 4)); // bilinmeyen tipler geçer
+    }
+
+    #[test]
+    fn hotkey_action_detection() {
+        use std::collections::HashSet;
+        let cfg = HotkeyConfig::default(); // Ctrl+Alt+Shift+R/P/S
+        let mut pressed: HashSet<u16> = [29, 56, 42, 19].into_iter().collect();
+        assert_eq!(hotkey_action_for(&cfg, &pressed), Some(HotkeyAction::Record));
+        pressed.remove(&19);
+        pressed.insert(25);
+        assert_eq!(hotkey_action_for(&cfg, &pressed), Some(HotkeyAction::Play));
+        pressed.clear();
+        pressed.insert(30);
+        assert_eq!(hotkey_action_for(&cfg, &pressed), None);
+        // Tek tuş kombo
+        let single = KeyCombo { ctrl: false, alt: false, shift: false, super_key: false, key_code: 66 };
+        let cfg2 = HotkeyConfig { record: single, play: cfg.play.clone(), stop: cfg.stop.clone(), lang: "en".into(), recent_files: vec![] };
+        let mut p2: HashSet<u16> = HashSet::new();
+        p2.insert(66);
+        assert_eq!(hotkey_action_for(&cfg2, &p2), Some(HotkeyAction::Record));
+    }
+
+    #[test]
+    fn chord_codes_cover_required_modifiers() {
+        let combo = KeyCombo { ctrl: true, alt: true, shift: true, super_key: false, key_code: 19 };
+        let codes = chord_modifier_codes(&combo);
+        assert!(codes.contains(&29) && codes.contains(&56) && codes.contains(&42));
+        assert!(!codes.contains(&125));
+        let single = KeyCombo { ctrl: false, alt: false, shift: false, super_key: false, key_code: 66 };
+        assert!(chord_modifier_codes(&single).is_empty());
+    }
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -351,6 +408,21 @@ pub struct HotkeyConfig {
     /// UI language code ("en", "tr", ...). Defaulted so old config files still parse.
     #[serde(default = "default_lang_code")]
     pub lang: String,
+    /// Recently used macro files (newest first, max RECENT_MAX). Missing files
+    /// are kept but shown greyed out in the UI.
+    #[serde(default)]
+    pub recent_files: Vec<String>,
+}
+
+impl HotkeyConfig {
+    pub const RECENT_MAX: usize = 8;
+
+    /// Newest-first insert with dedupe + cap. Pure logic (unit-tested).
+    pub fn push_recent(list: &mut Vec<String>, path: &str) {
+        list.retain(|p| p != path);
+        list.insert(0, path.to_string());
+        list.truncate(Self::RECENT_MAX);
+    }
 }
 
 fn default_lang_code() -> String {
@@ -364,8 +436,68 @@ impl Default for HotkeyConfig {
             play: KeyCombo::new(25),   // P
             stop: KeyCombo::new(31),   // S
             lang: default_lang_code(),
+            recent_files: Vec::new(),
         }
     }
+}
+
+/// Which device classes to record. At least one must stay enabled (UI clamps).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct RecordFilter {
+    pub keyboard: bool,
+    pub mouse: bool,
+}
+
+impl Default for RecordFilter {
+    fn default() -> Self {
+        Self { keyboard: true, mouse: true }
+    }
+}
+
+/// evdev event-type numbers (kept as constants to avoid pulling evdev into models).
+pub const EV_KEY: u16 = 1;
+pub const EV_REL: u16 = 2;
+pub const EV_ABS: u16 = 3;
+
+/// Does this event type pass the record filter? Unknown types always pass.
+pub fn record_filter_allows(filter: &RecordFilter, event_type: u16) -> bool {
+    match event_type {
+        EV_KEY => filter.keyboard,
+        EV_REL | EV_ABS => filter.mouse,
+        _ => true,
+    }
+}
+
+/// Which hotkey action (if any) does the currently-pressed set trigger?
+pub fn hotkey_action_for(config: &HotkeyConfig, pressed: &std::collections::HashSet<u16>) -> Option<HotkeyAction> {
+    if config.record.matches(pressed) {
+        Some(HotkeyAction::Record)
+    } else if config.play.matches(pressed) {
+        Some(HotkeyAction::Play)
+    } else if config.stop.matches(pressed) {
+        Some(HotkeyAction::Stop)
+    } else {
+        None
+    }
+}
+
+/// Linux evdev codes of the modifier keys a combo requires.
+/// Used to suppress the whole chord (trigger key + held modifiers) from recordings.
+pub fn chord_modifier_codes(combo: &KeyCombo) -> Vec<u16> {
+    let mut codes = Vec::with_capacity(8);
+    if combo.ctrl {
+        codes.extend([29, 97]);
+    }
+    if combo.alt {
+        codes.extend([56, 100]);
+    }
+    if combo.shift {
+        codes.extend([42, 54]);
+    }
+    if combo.super_key {
+        codes.extend([125, 126]);
+    }
+    codes
 }
 
 #[derive(Debug, Clone)]
@@ -379,6 +511,8 @@ pub enum Command {
     LoadMacro(String),
     SetHotkey(HotkeyAction, KeyCombo),
     SetLoopCount(u32),
+    SetSpeedMultiplier(f32),
+    SetRecordFilter { keyboard: bool, mouse: bool },
     SaveConfig,
     Quit,
 }

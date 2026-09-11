@@ -19,6 +19,8 @@ pub struct Player {
     cmd_rx: Receiver<Command>,
     event_tx: Sender<String>,
     loop_count: Arc<Mutex<u32>>,
+    /// Oynatma hızı (1.0 = normal). UI'dan SetSpeedMultiplier ile.
+    speed: Arc<Mutex<f32>>,
     /// UI ile paylaşılan acil-stop bayrağı (kanaldan bağımsız, anında).
     stop_flag: Arc<AtomicBool>,
 }
@@ -37,8 +39,23 @@ impl Player {
             cmd_rx,
             event_tx,
             loop_count: Arc::new(Mutex::new(1)),
+            speed: Arc::new(Mutex::new(1.0)),
             stop_flag,
         }
+    }
+
+    /// Hız aralığı dışındaki değerleri kelepçeler. Saf fonksiyon (testli).
+    pub fn clamp_speed(speed: f32) -> f32 {
+        if !speed.is_finite() {
+            return 1.0;
+        }
+        speed.clamp(0.25, 4.0)
+    }
+
+    /// Hız çarpanı uygulanmış bekleme (mikrosaniye). Saf fonksiyon (testli).
+    pub fn scaled_delay_us(delay_us: u64, speed: f32) -> u64 {
+        let s = Self::clamp_speed(speed);
+        ((delay_us as f64) / (s as f64)).round() as u64
     }
 
     fn create_virtual_device() -> std::io::Result<VirtualDevice> {
@@ -140,12 +157,14 @@ impl Player {
         count
     }
 
-    /// Komut kanalını yoklar; Stop/Quit/SetLoopCount'u işler.
+    /// Komut kanalını yoklar; Stop/Quit/SetLoopCount/SetSpeedMultiplier işler.
+    /// Dönüş: (quit_istendi, stop_istendi)
     fn poll_commands(
         cmd_rx: &Receiver<Command>,
         state: &Mutex<AppState>,
         event_tx: &Sender<String>,
         loop_count: &Mutex<u32>,
+        speed: &Mutex<f32>,
         stop: &AtomicBool,
     ) -> (bool, bool) {
         let mut quit = false;
@@ -162,6 +181,11 @@ impl Player {
                 Command::SetLoopCount(count) => {
                     *loop_count.lock().unwrap() = count;
                     info!("Loop count set: {}", count);
+                }
+                Command::SetSpeedMultiplier(s) => {
+                    let s = Player::clamp_speed(s);
+                    *speed.lock().unwrap() = s;
+                    info!("Speed set: {:.2}x", s);
                 }
                 Command::Quit => {
                     stop.store(true, Ordering::Relaxed);
@@ -217,6 +241,11 @@ impl Player {
                         *self.loop_count.lock().unwrap() = count;
                         info!("Loop count set: {}", count);
                     }
+                    Command::SetSpeedMultiplier(s) => {
+                        let s = Player::clamp_speed(s);
+                        *self.speed.lock().unwrap() = s;
+                        info!("Speed set: {:.2}x", s);
+                    }
                     Command::Quit => {
                         info!("Player thread stopping");
                         break;
@@ -240,6 +269,7 @@ impl Player {
                 }
 
                 let loop_count = *self.loop_count.lock().unwrap();
+                let speed = *self.speed.lock().unwrap();
                 let mut current_loop = 0;
                 let playback_start = Instant::now();
                 let mut emergency_stop = false;
@@ -257,6 +287,7 @@ impl Player {
                             &self.state,
                             &self.event_tx,
                             &self.loop_count,
+                            &self.speed,
                             &stop_flag,
                         );
                         if quit {
@@ -269,6 +300,7 @@ impl Player {
                         }
 
                         let delay_us = event.timestamp_us.saturating_sub(last_timestamp_us);
+                        let delay_us = Self::scaled_delay_us(delay_us, speed);
                         if delay_us > 0 {
                             // Kesilebilir bekleme: stop gelirse anında false döner
                             if !Self::precise_sleep_interruptible(
@@ -307,7 +339,7 @@ impl Player {
 
                     if loop_count == 0 {
                         self.event_tx
-                            .send(format!("Loop {} (sonsuz)", current_loop))
+                            .send(format!("Loop {} (infinite)", current_loop))
                             .ok();
                     } else {
                         self.event_tx
@@ -315,11 +347,13 @@ impl Player {
                             .ok();
                     }
 
-                    // Döngü arası 50ms de kesilebilir olmalı
+                    // Döngü arası bekleme de kesilebilir olmalı + hıza ölçeklenir
+                    let gap_ms = Self::scaled_delay_us(50_000, speed) / 1000;
                     if !stop_flag.load(Ordering::Relaxed)
                         && (loop_count == 0 || current_loop < loop_count)
+                        && gap_ms > 0
                         && !Self::precise_sleep_interruptible(
-                            Duration::from_millis(50),
+                            Duration::from_millis(gap_ms),
                             &stop_flag,
                         )
                     {
@@ -409,5 +443,18 @@ mod tests {
             "emergency stop took {:?}, too slow!",
             elapsed
         );
+    }
+
+    #[test]
+    fn speed_scaling_and_clamp() {
+        assert_eq!(Player::scaled_delay_us(100_000, 1.0), 100_000);
+        assert_eq!(Player::scaled_delay_us(100_000, 2.0), 50_000);
+        assert_eq!(Player::scaled_delay_us(100_000, 4.0), 25_000);
+        assert_eq!(Player::scaled_delay_us(100_000, 0.5), 200_000);
+        // Kelepçe: aralık dışı ve geçersiz değerler
+        assert_eq!(Player::scaled_delay_us(100_000, 100.0), 25_000);
+        assert_eq!(Player::scaled_delay_us(100_000, 0.0), 400_000);
+        assert_eq!(Player::scaled_delay_us(100_000, f32::NAN), 100_000);
+        assert_eq!(Player::scaled_delay_us(0, 4.0), 0);
     }
 }

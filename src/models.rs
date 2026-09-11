@@ -73,7 +73,7 @@ impl MacroRecording {
     pub fn save_to_file(&self, path: &str) -> Result<(), String> {
         // Path traversal koruması: mutlak yolu normalize et, parent erişimini reddet
         if path.contains("..") {
-            return Err("Geçersiz dosya yolu (.. içeremez)".to_string());
+            return Err("Invalid file path (must not contain ..)".to_string());
         }
         let file = MacroFile {
             version: MacroFile::CURRENT_VERSION,
@@ -85,23 +85,23 @@ impl MacroRecording {
         };
         if path.ends_with(".json") {
             let data = serde_json::to_string_pretty(&file)
-                .map_err(|e| format!("JSON yazma hatası: {}", e))?;
-            std::fs::write(path, data).map_err(|e| format!("Dosya yazılamadı: {}", e))?;
+                .map_err(|e| format!("JSON write error: {}", e))?;
+            std::fs::write(path, data).map_err(|e| format!("Cannot write file: {}", e))?;
         } else {
             let data =
-                bincode::serialize(&file).map_err(|e| format!("Binary yazma hatası: {}", e))?;
-            std::fs::write(path, data).map_err(|e| format!("Dosya yazılamadı: {}", e))?;
+                bincode::serialize(&file).map_err(|e| format!("Binary write error: {}", e))?;
+            std::fs::write(path, data).map_err(|e| format!("Cannot write file: {}", e))?;
         }
         Ok(())
     }
 
     pub fn load_from_file(path: &str) -> Result<Self, String> {
         if path.contains("..") {
-            return Err("Geçersiz dosya yolu (.. içeremez)".to_string());
+            return Err("Invalid file path (must not contain ..)".to_string());
         }
-        let data = std::fs::read(path).map_err(|e| format!("Dosya okunamadı: {}", e))?;
+        let data = std::fs::read(path).map_err(|e| format!("Cannot read file: {}", e))?;
         let file: MacroFile = if path.ends_with(".json") {
-            serde_json::from_slice(&data).map_err(|e| format!("JSON parse hatası: {}", e))?
+            serde_json::from_slice(&data).map_err(|e| format!("JSON parse error: {}", e))?
         } else {
             // Geriye uyumluluk: önce yeni MacroFile formatını dene,
             // başarısız olursa saf Vec<MacroEvent> (eski bincode) dene
@@ -109,7 +109,7 @@ impl MacroRecording {
                 Ok(f) => f,
                 Err(_) => {
                     let events: Vec<MacroEvent> = bincode::deserialize(&data)
-                        .map_err(|e| format!("Binary parse hatası: {}", e))?;
+                        .map_err(|e| format!("Binary parse error: {}", e))?;
                     let duration_us = events.last().map(|e| e.timestamp_us).unwrap_or(0);
                     MacroFile {
                         version: 1,
@@ -127,7 +127,7 @@ impl MacroRecording {
         };
         if file.version > MacroFile::CURRENT_VERSION {
             return Err(format!(
-                "Desteklenmeyen dosya versiyonu: {} (max {})",
+                "Unsupported file version: {} (max {})",
                 file.version,
                 MacroFile::CURRENT_VERSION
             ));
@@ -354,7 +354,7 @@ pub struct HotkeyConfig {
 }
 
 fn default_lang_code() -> String {
-    "tr".to_string()
+    "en".to_string()
 }
 
 impl Default for HotkeyConfig {

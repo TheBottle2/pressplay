@@ -49,7 +49,7 @@ cargo build --release
 
 Shortcuts can be changed in the Settings tab: click Change → press a single key (e.g. `F8`) or a key with `Ctrl/Alt/Shift`. Assignment takes effect immediately and is saved to disk.
 > ⚠ Single-letter/key shortcuts also fire while typing — `F8–F12` recommended. The `Super` key cannot be captured (egui doesn't report it); existing Super-based shortcuts keep working.
-> 🌍 The interface language is switchable in Settings (9 languages, default Türkçe) and persists across restarts.
+> 🌍 The interface language is switchable in Settings (9 languages, default English) and persists across restarts.
 
 > Note: `KeyCombo::new()` defaults to `ctrl+alt+shift` held + main key. Matching in `KeyCombo::matches()` checks left/right Ctrl/Alt/Shift/Super codes. 200ms debounce.
 
@@ -227,4 +227,4 @@ Honest list for the current code (details in `HANDOFF.md`):
 | Hotkey not working | Another app may swallow the key; watch pressed codes with `RUST_LOG=debug` |
 | "Does it work on Wayland?" | Yes — the app reads the kernel directly (`/dev/input`), bypassing the compositor entirely. If it fails on Wayland, it's a permission issue (see above), not a Wayland issue |
 | Menu entry does nothing | `~/.local/bin` may not be in PATH or groups need relogin → log out/in, then check `which linux-tinytask` |
-| Logs are in Turkish | Status messages in the UI follow the selected language, but detailed logs (`RUST_LOG=...`) are currently Turkish |
+| Logs are in Turkish | Status messages in the UI follow the selected language; older builds logged in Turkish — current logs are English |

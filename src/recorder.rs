@@ -42,7 +42,7 @@ impl Recorder {
         let entries = match fs::read_dir("/dev/input") {
             Ok(e) => e,
             Err(_) => {
-                error!("Cannot read /dev/input - root yetkisi veya input grubu gerekli!");
+                error!("Cannot read /dev/input - root or input group required!");
                 return devices;
             }
         };
@@ -64,7 +64,7 @@ impl Recorder {
 
                             if (has_key || has_rel || has_abs) && !is_power {
                                 info!(
-                                    "Kaydedilecek cihaz: {:?} - {}",
+                                    "Recording device: {:?} - {}",
                                     path,
                                     device.name().unwrap_or("unknown")
                                 );
@@ -83,7 +83,7 @@ impl Recorder {
         let device_paths = Self::enumerate_input_devices();
 
         if device_paths.is_empty() {
-            error!("Hiçbir input cihazı bulunamadı!");
+            error!("No input devices found!");
             return;
         }
 
@@ -98,7 +98,7 @@ impl Recorder {
         let mut start_time = SystemTime::now();
         let mut local_buffer: Vec<MacroEvent> = Vec::with_capacity(10_000);
 
-        info!("Recorder thread başladı. {} cihaz izleniyor.", devices.len());
+        info!("Recorder thread started. Watching {} devices.", devices.len());
 
         use nix::poll::{poll, PollFd, PollFlags, PollTimeout};
 
@@ -111,7 +111,7 @@ impl Recorder {
                         local_buffer.clear();
                         *self.state.lock().unwrap() = AppState::Recording;
                         self.event_tx.send("Recording started".to_string()).ok();
-                        info!("Kayıt başladı");
+                        info!("Recording started");
                     }
                     Command::StopRecording => {
                         recording_active = false;
@@ -134,7 +134,7 @@ impl Recorder {
                             ))
                             .ok();
                         info!(
-                            "Kayıt durdu, {} event kaydedildi (süre: {}µs)",
+                            "Recording stopped, {} events recorded (duration: {}µs)",
                             count, duration_us
                         );
                     }
@@ -152,11 +152,11 @@ impl Recorder {
                                 self.event_tx
                                     .send(format!("Macro saved: {}", path))
                                     .ok();
-                                info!("Makro kaydedildi: {}", path);
+                                info!("Macro saved: {}", path);
                             }
                             Err(e) => {
                                 self.event_tx.send(format!("Save failed: {}", e)).ok();
-                                error!("Makro kaydetme hatası: {}", e);
+                                error!("Macro save error: {}", e);
                             }
                         }
                     }
@@ -186,16 +186,16 @@ impl Recorder {
                                         MacroRecording::format_duration(duration_us)
                                     ))
                                     .ok();
-                                info!("Makro yüklendi: {} ({} event)", path, count);
+                                info!("Macro loaded: {} ({} events)", path, count);
                             }
                             Err(e) => {
                                 self.event_tx.send(format!("Load failed: {}", e)).ok();
-                                error!("Makro yükleme hatası: {}", e);
+                                error!("Macro load error: {}", e);
                             }
                         }
                     }
                     Command::Quit => {
-                        info!("Recorder thread kapanıyor");
+                        info!("Recorder thread stopping");
                         break;
                     }
                     _ => {}
@@ -246,7 +246,7 @@ impl Recorder {
                     }
                 }
                 Err(e) => {
-                    error!("Poll hatası: {}", e);
+                    error!("Poll error: {}", e);
                 }
             }
         }

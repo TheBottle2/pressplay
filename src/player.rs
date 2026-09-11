@@ -133,10 +133,10 @@ impl Player {
         for code in held.drain() {
             let ev = InputEvent::new(EventType::KEY, code, 0);
             if let Err(e) = device.emit(&[ev]) {
-                error!("Takılı tuş bırakılamadı (code {}): {:?}", code, e);
+                error!("Failed to release stuck key (code {}): {:?}", code, e);
             }
         }
-        info!("{} takılı tuş bırakıldı", count);
+        info!("{} stuck keys released", count);
         count
     }
 
@@ -156,12 +156,12 @@ impl Player {
                     stop.store(true, Ordering::Relaxed);
                     *state.lock().unwrap() = AppState::Idle;
                     event_tx.send("Playback stopped".to_string()).ok();
-                    info!("Oynatma durdu (acil stop)");
+                    info!("Playback stopped (emergency stop)");
                     stopped = true;
                 }
                 Command::SetLoopCount(count) => {
                     *loop_count.lock().unwrap() = count;
-                    info!("Loop count ayarlandı: {}", count);
+                    info!("Loop count set: {}", count);
                 }
                 Command::Quit => {
                     stop.store(true, Ordering::Relaxed);
@@ -179,12 +179,12 @@ impl Player {
     pub fn run(self) {
         let virtual_device = match Self::create_virtual_device() {
             Ok(dev) => {
-                info!("Sanal input cihazı oluşturuldu (uinput)");
+                info!("Virtual input device created (uinput)");
                 dev
             }
             Err(e) => {
                 error!(
-                    "Sanal cihaz oluşturulamadı: {:?} - root/uinput grubu gerekli!",
+                    "Failed to create virtual device: {:?} - root/uinput group required!",
                     e
                 );
                 return;
@@ -197,7 +197,7 @@ impl Player {
         let stop_flag = self.stop_flag.clone();
         let mut playing = false;
 
-        info!("Player thread başladı");
+        info!("Player thread started");
 
         loop {
             // --- komut yoklama (oynatma yokken bloklamayan) ---
@@ -208,17 +208,17 @@ impl Player {
                         stop_flag.store(false, Ordering::Relaxed);
                         *self.state.lock().unwrap() = AppState::Playing;
                         self.event_tx.send("Playback started".to_string()).ok();
-                        info!("Oynatma başladı");
+                        info!("Playback started");
                     }
                     Command::StopPlayback => {
                         // Zaten idle; yoksay
                     }
                     Command::SetLoopCount(count) => {
                         *self.loop_count.lock().unwrap() = count;
-                        info!("Loop count ayarlandı: {}", count);
+                        info!("Loop count set: {}", count);
                     }
                     Command::Quit => {
-                        info!("Player thread kapanıyor");
+                        info!("Player thread stopping");
                         break;
                     }
                     _ => {}
@@ -232,7 +232,7 @@ impl Player {
                 };
 
                 if events.is_empty() {
-                    warn!("Oynatılacak event yok!");
+                    warn!("No events to play!");
                     playing = false;
                     *self.state.lock().unwrap() = AppState::Idle;
                     thread::sleep(Duration::from_millis(10));
@@ -252,7 +252,6 @@ impl Player {
                     let mut last_timestamp_us: u64 = 0;
 
                     for event in &events {
-                        // Her event öncesi: kanal yokla (geç gelen Stop/Quit/LoopCount)
                         let (quit, _) = Self::poll_commands(
                             &self.cmd_rx,
                             &self.state,
@@ -261,7 +260,7 @@ impl Player {
                             &stop_flag,
                         );
                         if quit {
-                            info!("Player thread kapanıyor (oynatma içi Quit)");
+                            info!("Player thread stopping (in-playback Quit)");
                             return;
                         }
                         if stop_flag.load(Ordering::Relaxed) {
@@ -289,7 +288,7 @@ impl Player {
 
                         let evdev_event = event.to_evdev();
                         if let Err(e) = device.emit(&[evdev_event]) {
-                            error!("Event yazılamadı: {:?}", e);
+                            error!("Failed to write event: {:?}", e);
                             stop_flag.store(true, Ordering::Relaxed);
                             emergency_stop = true;
                             break;
@@ -338,15 +337,15 @@ impl Player {
                 if emergency_stop || stop_flag.load(Ordering::Relaxed) {
                     self.event_tx
                         .send(if released > 0 {
-                            format!("Playback stopped ({} tuş bırakıldı)", released)
+                            format!("Playback stopped ({} keys released)", released)
                         } else {
                             "Playback stopped".to_string()
                         })
                         .ok();
-                    info!("Oynatma acil durduruldu ({:?})", elapsed);
+                    info!("Playback emergency-stopped ({:?})", elapsed);
                 } else {
                     self.event_tx.send("Playback finished".to_string()).ok();
-                    info!("Oynatma tamamlandı ({:?})", elapsed);
+                    info!("Playback finished ({:?})", elapsed);
                 }
                 stop_flag.store(false, Ordering::Relaxed);
             }
@@ -370,7 +369,7 @@ mod tests {
         assert!(done);
         assert!(
             elapsed >= Duration::from_millis(45) && elapsed < Duration::from_millis(80),
-            "50ms sleep {:?} sürdü (2x yavaşlık bug'ı dönmüş olabilir)",
+            "50ms sleep took {:?} (the 2x slowdown bug may be back)",
             elapsed
         );
     }
@@ -404,10 +403,10 @@ mod tests {
         let done =
             Player::precise_sleep_interruptible(Duration::from_secs(5), &stop);
         let elapsed = start.elapsed();
-        assert!(!done, "stop bayrağına rağmen sleep tamamlandı gösterdi");
+        assert!(!done, "sleep reported done despite stop flag");
         assert!(
             elapsed < Duration::from_millis(50),
-            "acill stop {:?} sürdü, çok yavaş!",
+            "emergency stop took {:?}, too slow!",
             elapsed
         );
     }

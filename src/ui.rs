@@ -556,6 +556,6 @@ pub fn run_ui(
             )) as Box<dyn eframe::App>
         }),
     ) {
-        log::error!("UI hatası: {:?}", e);
+        log::error!("UI error: {:?}", e);
     }
 }

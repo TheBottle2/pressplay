@@ -21,9 +21,9 @@ pub enum Lang {
 }
 
 impl Default for Lang {
-    /// Existing users keep Turkish.
+    /// Default UI language is English.
     fn default() -> Self {
-        Lang::Tr
+        Lang::En
     }
 }
 
@@ -760,7 +760,7 @@ mod tests {
 
     #[test]
     fn from_code_roundtrip_and_default() {
-        assert_eq!(Lang::default(), Lang::Tr);
+        assert_eq!(Lang::default(), Lang::En);
         for lang in Lang::all() {
             assert_eq!(Lang::from_code(lang.code()), Some(*lang));
         }

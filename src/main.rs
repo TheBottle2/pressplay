@@ -48,8 +48,8 @@ pub(crate) fn save_config(config: &HotkeyConfig) {
 fn main() {
     env_logger::Builder::from_env(env_logger::Env::default().default_filter_or("info")).init();
 
-    info!("Linux TinyTask başlatılıyor...");
-    info!("NOT: Bu uygulama /dev/input ve /dev/uinput erişimi gerektirir.");
+    info!("Starting Linux TinyTask...");
+    info!("NOTE: This app requires /dev/input and /dev/uinput access.");
 
     let state = Arc::new(Mutex::new(AppState::Idle));
     let recording = Arc::new(Mutex::new(MacroRecording::new("untitled".to_string())));
@@ -71,7 +71,7 @@ fn main() {
     // try_send kullanılır: hedef kanal dolu olsa bile dispatcher kilitlenmez,
     // acil stop komutları gecikmez (stop bayrağı ayrıca anında iletilir).
     std::thread::spawn(move || {
-        info!("Dispatcher thread başladı");
+        info!("Dispatcher thread started");
         for cmd in cmd_rx_dispatcher {
             match &cmd {
                 Command::StartRecording
@@ -79,14 +79,14 @@ fn main() {
                 | Command::SaveMacro(_)
                 | Command::LoadMacro(_) => {
                     if cmd_tx_recorder.try_send(cmd).is_err() {
-                        warn!("Recorder kanalı dolu, komut düşürüldü");
+                        warn!("Recorder channel full, command dropped");
                     }
                 }
                 Command::StartPlayback
                 | Command::StopPlayback
                 | Command::SetLoopCount(_) => {
                     if cmd_tx_player.try_send(cmd).is_err() {
-                        warn!("Player kanalı dolu, komut düşürüldü");
+                        warn!("Player channel full, command dropped");
                     }
                 }
                 Command::SetHotkey(_, _) | Command::SaveConfig => {
@@ -99,7 +99,7 @@ fn main() {
                 }
             }
         }
-        info!("Dispatcher thread kapandı");
+        info!("Dispatcher thread stopped");
     });
 
     // Recorder thread
@@ -147,7 +147,7 @@ fn main() {
                 let rec = sync_recording.lock().unwrap();
                 let mut player_events = sync_player_events.lock().unwrap();
                 *player_events = rec.events.clone();
-                info!("{} event player'a senkronize edildi", player_events.len());
+                info!("{} events synced to player", player_events.len());
             }
 
             last_state = current_state;
@@ -169,11 +169,11 @@ fn main() {
         );
     });
 
-    info!("UI başlatılıyor...");
+    info!("Starting UI...");
     let lang = Lang::from_code(&hotkey_config.lock().unwrap().lang).unwrap_or_default();
     ui::run_ui(state, recording, hotkey_config, cmd_tx, event_rx, stop_flag, lang);
 
-    info!("Uygulama kapatılıyor...");
+    info!("Shutting down...");
     std::process::exit(0);
 }
 
@@ -189,7 +189,7 @@ fn run_hotkey_thread(
     use std::fs;
     use std::os::unix::io::{AsRawFd, BorrowedFd};
 
-    info!("Hotkey thread başladı");
+    info!("Hotkey thread started");
 
     let mut devices: Vec<Device> = Vec::new();
     if let Ok(entries) = fs::read_dir("/dev/input") {

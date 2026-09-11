@@ -1,0 +1,18 @@
+[Desktop Entry]
+Categories=Utility;
+Comment[tr_TR]=Minimalist macro recorder for Linux (X11/Wayland)
+Comment=Minimalist macro recorder for Linux (X11/Wayland)
+Exec=linux-tinytask
+GenericName[tr_TR]=
+GenericName=
+Icon=linux-tinytask
+MimeType=
+Name[tr_TR]=Linux TinyTask
+Name=Linux TinyTask
+Path=
+StartupNotify=true
+Terminal=false
+TerminalOptions=
+Type=Application
+X-KDE-SubstituteUID=false
+X-KDE-Username=

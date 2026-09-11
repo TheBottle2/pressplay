@@ -1,0 +1,20 @@
+# Rust build çıktıları
+target/
+debug/
+release/
+
+# AppImage build artıkları
+AppDir/
+*.AppImage
+linuxdeploy*.AppImage
+appimagetool*.AppImage
+
+# Test/kayıt çıktıları
+*.tts
+
+# Editör/OS artıkları
+.vscode/
+.idea/
+*.swp
+*~
+.DS_Store

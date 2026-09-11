@@ -1,158 +1,169 @@
 # Linux TinyTask
 
-**Linux için minimalist, kernel-seviyesi makro kaydedici ve oynatıcı**
+**Minimalist, kernel-level macro recorder and player for Linux**
 
-Linux TinyTask, Windows'taki popüler TinyTask uygulamasının Linux karşılığıdır. X11 ve Wayland'dan bağımsız olarak doğrudan Linux kernel input subsystem (`/dev/input` + `/dev/uinput`) ile çalışır, milisaniye/mikrosaniye hassasiyetinde kayıt ve oynatma yapar.
+Linux TinyTask is the Linux counterpart of the popular Windows TinyTask app. It talks directly to the Linux kernel input subsystem (`/dev/input` + `/dev/uinput`), independent of X11 and Wayland, recording and replaying macros with millisecond/microsecond precision.
 
-## 🎯 Özellikler
+## ⚡ Quick Start (simplest)
 
-### Çalışan Özellikler
-- **Kernel-seviyesi kayıt**: `/dev/input/event*` üzerinden tüm klavye + mouse (REL) yakalama, 1ms `poll` timeout
-- **Kernel-seviyesi oynatma**: `/dev/uinput` sanal cihaz (`LinuxTinyTask Virtual Device`) üzerinden event enjeksiyonu
-- **Display server bağımsızlığı**: X11/Wayland/Proton/Wine'da çalışır, X11/Wayland kütüphanesine bağımlı değildir
-- **Hassas zamanlama**: deadline tabanlı kesilebilir `precise_sleep_interruptible` (100µs altı busy-wait, üstü 2ms parçalı sleep + son 800µs spin), event başına `timestamp_us` farkı kadar bekleme
-- **Acil durdurma**: `AtomicBool` stop bayrağı; her event öncesi + sleep içinde ~1ms'de bir kontrol edilir, `StopPlayback` anında emit'i keser, **basılı kalmış tuşları otomatik bırakır** (takılı Ctrl vb. yüzünden klavye/fare bozulmaz) ve Idle'a geçirir (oynatma içi kanal yoklama ile)
-- **Makro dosyaları**: `.tts` (bincode, küçük/hızlı) ve `.json` (okunabilir/debug) formatlarında kaydetme/yükleme; versiyonlu `MacroFile` sarmalayıcı, path-traversal korumalı
-- **Makro paneli**: Kontrol sekmesinde hızlı Kaydet/Yükle + ayrı `Makrolar` sekmesi (ad, süre, event sayısı, tarih)
-- **Süre gösterimi**: kayıtta `duration_us` hesaplanır, UI'da `12.34s / 850ms / 400µs` formatında gösterilir
-- **Döngü modu**: 1–9999 tekrar veya sonsuz döngü (`0 = sonsuz`), döngü arası 50ms bekleme
-- **Global hotkey'ler**: Kayıt/oynat/durdur için sistem geneli kısayollar (kayıt thread'inden bağımsız hotkey thread)
-- **Config persistence**: Hotkey yapılandırması `~/.config/linux-tinytask/tinytask_config.json` içinde JSON olarak saklanır
-- **Minimalist UI**: `eframe/egui` ile always-on-top, 420x480, sekmeli arayüz (Kontrol / Makrolar / Ayarlar / Hakkında)
-- **Çok thread'li mimari**: Dispatcher + Recorder + Player + Sync + Hotkey + UI thread'leri, `crossbeam-channel` ile haberleşme
+One-time setup (builds, installs a menu entry, fixes permissions — sudo is asked only here):
 
-### Varsayılan Kısayollar
-| İşlem | Varsayılan |
+```bash
+./install.sh
+# if you were added to the 'input' group: log out and back in once
+```
+
+After that, launch **Linux TinyTask** from the app menu — no terminal, no sudo needed.
+
+Alternative (without install, from this folder):
+
+```bash
+cargo build --release
+./run.sh   # sudo with display env preserved (plain sudo breaks the GUI)
+```
+
+## 🎯 Features
+
+### Working Features
+- **Kernel-level recording**: captures all keyboard + mouse (REL) via `/dev/input/event*`, 1ms `poll` timeout
+- **Kernel-level playback**: event injection through a `/dev/uinput` virtual device (`LinuxTinyTask Virtual Device`)
+- **Display-server independence**: works on X11/Wayland/Proton/Wine, no X11/Wayland library dependencies
+- **Precise timing**: deadline-based, interruptible `precise_sleep_interruptible` (busy-wait under 100µs, chunked 2ms sleep + 800µs spin above), waiting `timestamp_us` deltas per event
+- **Emergency stop**: `AtomicBool` stop flag checked before every event and ~every 1ms inside sleep; `StopPlayback` halts emission instantly, **auto-releases stuck keys** (no more broken keyboard/mouse from a wedged Ctrl) and returns to Idle (with in-playback channel polling)
+- **Macro files**: save/load in `.tts` (bincode, small/fast) and `.json` (readable/debug) formats; versioned `MacroFile` wrapper, path-traversal protected
+- **Macro panel**: quick Save/Load in the Control tab + a dedicated `Macros` tab (name, duration, event count, date)
+- **Duration display**: `duration_us` computed on record, shown in the UI as `12.34s / 850ms / 400µs`
+- **Loop mode**: 1–9999 repeats or infinite loop (`0 = infinite`), 50ms gap between loops
+- **Global hotkeys**: system-wide shortcuts for record/play/stop (dedicated hotkey thread)
+- **Config persistence**: hotkey configuration stored as JSON in `~/.config/linux-tinytask/tinytask_config.json`
+- **Minimalist UI**: `eframe/egui`, always-on-top, 420x480, tabbed interface (Control / Macros / Settings / About)
+- **Multi-threaded architecture**: Dispatcher + Recorder + Player + Sync + Hotkey + UI threads communicating over `crossbeam-channel`
+
+### Default Shortcuts
+| Action | Default |
 |---|---|
-| Kayıt Başlat/Durdur (toggle) | `Ctrl+Alt+Shift+R` |
-| Oynat Başlat | `Ctrl+Alt+Shift+P` |
-| Oynatmayı Durdur | `Ctrl+Alt+Shift+S` |
+| Start/Stop recording (toggle) | `Ctrl+Alt+Shift+R` |
+| Start playback | `Ctrl+Alt+Shift+P` |
+| Stop playback | `Ctrl+Alt+Shift+S` |
 
-Kısayollar **Ayarlar** sekmesinden değiştirilebilir: `Değiştir` → tek tuş (örn. `F8`) veya `Ctrl/Alt/Shift` ile birlikte bir tuş basın. Atama anında aktif olur ve diske kaydedilir.
-> ⚠ Tek harf/tuş kısayollar yazı yazarken de tetiklenir — `F8–F12` önerilir. `Super` tuşu yakalanamaz (egui bildirmez), mevcut Super'li kısayollar çalışmaya devam eder.
+Shortcuts can be changed in the **Settings** tab: click `Change` → press a single key (e.g. `F8`) or a key with `Ctrl/Alt/Shift`. Assignment takes effect immediately and is saved to disk.
+> ⚠ Single-letter/key shortcuts also fire while typing — `F8–F12` recommended. The `Super` key cannot be captured (egui doesn't report it); existing Super-based shortcuts keep working.
 
-> Not: `KeyCombo::new()` varsayılan olarak `ctrl+alt+shift` basılı + ana tuş ister. Eşleşme `KeyCombo::matches()` ile sol/sağ Ctrl/Alt/Shift/Super kodlarına bakılarak yapılır. 200ms debounce vardır.
+> Note: `KeyCombo::new()` defaults to `ctrl+alt+shift` held + main key. Matching in `KeyCombo::matches()` checks left/right Ctrl/Alt/Shift/Super codes. 200ms debounce.
 
-## 🏗️ Mimari
+## 🏗️ Architecture
 
 ```
 UI (egui) ──Command──▶ Dispatcher ──┬──▶ Recorder ──▶ /dev/input/event* (poll 1ms)
                                     │         ↕ (Arc<Mutex<MacroRecording>>)
-                                    │     Sync thread (5ms poll, Recording→Idle geçişinde kopyalar)
+                                    │     Sync thread (5ms poll, copies on Recording→Idle)
                                     │         ↓
                                     └──▶ Player ──▶ /dev/uinput (VirtualDevice)
 Hotkey thread (/dev/input poll) ──Command──▶ Dispatcher
 Recorder/Player ──String──▶ UI (status_message)
 ```
 
-### Dosya Yapısı
+### File Structure
 ```
 linux-tinytask/
 ├── src/
 │   ├── main.rs      # Config load/save, dispatcher, sync thread, hotkey thread, thread spawn
 │   ├── models.rs    # MacroEvent, MacroRecording, AppState, KeyCombo, HotkeyConfig, Command
-│   ├── recorder.rs  # /dev/input enumeration + poll + kayıt (SYN hariç tüm eventler)
-│   ├── player.rs    # uinput sanal cihaz + precise_sleep + loop oynatma
-│   └── ui.rs        # eframe/egui: Kontrol / Ayarlar / Hakkında sekmeleri
+│   ├── recorder.rs  # /dev/input enumeration + poll + recording (all events except SYN)
+│   ├── player.rs    # uinput virtual device + precise_sleep + loop playback
+│   └── ui.rs        # eframe/egui: Control / Macros / Settings / About tabs
 ├── Cargo.toml
 ├── Cargo.lock
+├── install.sh           # One-time setup: build + menu entry + permissions
+├── run.sh               # Run with sudo while preserving display env
 ├── build_appimage.sh
 ├── linux-tinytask.desktop
 ├── icon.png / icon.svg
 ├── README.md
-└── HANDOFF.md       # Oturumlar arası devir dosyası (her işlem sonrası güncellenir)
+└── HANDOFF.md       # Session handoff file (Turkish, updated after every change)
 ```
 
-### Veri Modeli
-- `MacroEvent { timestamp_us: u64, event_type: u16, code: u16, value: i32 }` — `from_evdev`/`to_evdev` ile dönüşüm.
-- `MacroRecording { name, created_at, duration_us, events: Vec<MacroEvent> }` — 10.000 kapasiteyle başlar.
+### Data Model
+- `MacroEvent { timestamp_us: u64, event_type: u16, code: u16, value: i32 }` — conversion via `from_evdev`/`to_evdev`.
+- `MacroRecording { name, created_at, duration_us, events: Vec<MacroEvent> }` — starts with 10,000 capacity.
 - `Command`: `StartRecording | StopRecording | StartPlayback | StopPlayback | SaveMacro(String) | LoadMacro(String) | SetHotkey(HotkeyAction, KeyCombo) | SetLoopCount(u32) | SaveConfig | Quit`
-- `AppState`: `Idle | Recording | Playing` — `Arc<Mutex<...>>` ile tüm thread'ler arasında paylaşılır.
+- `AppState`: `Idle | Recording | Playing` — shared across threads via `Arc<Mutex<...>>`.
 
-## 📋 Gereksinimler
+## 📋 Requirements
 
-### Sistem
+### System
 - Linux kernel 4.x+, x86_64
-- X11 veya Wayland (fark etmez)
-- `/dev/input` okuma ve `/dev/uinput` yazma izni (aşağıya bak)
+- X11 or Wayland (doesn't matter)
+- Read access to `/dev/input` and write access to `/dev/uinput` (handled by `install.sh`)
 
 ### Build
 - Rust 1.70+ + Cargo
 - gcc/make (build essentials)
-- `libudev-dev` (Debian/Ubuntu) veya `systemd-devel` (Fedora)
+- `libudev-dev` (Debian/Ubuntu) or `systemd-devel` (Fedora)
 
-### Bağımlılıklar (`Cargo.toml`)
-`evdev 0.12`, `nix 0.28 (poll, fs)`, `eframe/egui 0.27`, `serde + serde_json`, `bincode 1.3` (.tts formatı), `chrono 0.4`, `log + env_logger`, `crossbeam-channel 0.5`, `dirs 5.0`, `rfd 0.14` (native dosya dialogu).
+### Dependencies (`Cargo.toml`)
+`evdev 0.12`, `nix 0.28 (poll, fs)`, `eframe/egui 0.27`, `serde + serde_json`, `bincode 1.3` (.tts format), `chrono 0.4`, `log + env_logger`, `crossbeam-channel 0.5`, `dirs 5.0`, `rfd 0.14` (native file dialog).
 
-## 🚀 Kurulum
+## 🚀 Installation
 
-### 1. Rust Kurulumu
+### Option A: automatic (recommended)
 ```bash
+./install.sh
+```
+This builds the release binary, installs it to `~/.local/bin`, adds an app-menu entry + icon, adds you to the `input` group and installs a udev rule so `/dev/uinput` is accessible without sudo. Log out/in once if your groups changed, then launch from the menu.
+
+### Option B: manual
+```bash
+# 1. Rust
 curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh
 source ~/.cargo/env
 rustup default stable
-```
 
-### 2. Sistem Bağımlılıkları
-```bash
-# Debian/Ubuntu
+# 2. System deps
+# Debian/Ubuntu:
 sudo apt install build-essential libudev-dev
-
-# Fedora
+# Fedora:
 sudo dnf install gcc make systemd-devel
-```
 
-### 3. İzinleri Ayarlama (zorunlu)
-Uygulama `/dev/input` ve `/dev/uinput` erişimi olmadan çalışmaz. İkisinden birini seç:
+# 3. Permissions (pick one)
+sudo usermod -a -G input $USER   # then log out/in (recommended, permanent)
+# or run as root with display env preserved (see below)
 
-```bash
-# Seçenek A: gruplara ekle (önerilen, kalıcı)
-sudo usermod -a -G input,uinput $USER
-# sonra logout/login veya reboot
-
-# Seçenek B: tek seferlik root ile çalıştır
-sudo ./target/release/linux-tinytask
-```
-İzin yoksa log'da şunu görürsün: `Cannot read /dev/input`, `Sanal cihaz oluşturulamadı`, `Hiçbir input cihazı bulunamadı!`.
-
-### 4. Derleme ve Çalıştırma
-```bash
+# 4. Build & run
 cargo build --release
 ./target/release/linux-tinytask
-# log seviyesi: RUST_LOG=debug ./target/release/linux-tinytask
+# log level: RUST_LOG=debug ./target/release/linux-tinytask
 ```
 
-### 4b. Root ile çalıştırma (GUI + sudo)
-Çıplak `sudo` ortamı sıfırlar ve GUI display'e bağlanamaz. Ya grupları kullanın
-(Seçenek A, önerilen) ya da display değişkenlerini taşıyın:
+### Running as root (GUI + sudo)
+Bare `sudo` wipes the environment and the GUI can't connect to the display. Either use the group method above or carry the display variables:
 ```bash
-./run.sh                                   # taze release binary ile, display korunarak sudo
+./run.sh                                   # release binary via sudo, display preserved
 sudo env "DISPLAY=$DISPLAY" "WAYLAND_DISPLAY=$WAYLAND_DISPLAY" \
   "XDG_RUNTIME_DIR=$XDG_RUNTIME_DIR" ./target/release/linux-tinytask
 ```
-Not: root ile çalışınca config `/root/.config/linux-tinytask/` altına yazılır.
+Note: when run as root, the config is written under `/root/.config/linux-tinytask/`.
 
-### 5. AppImage (taşınabilir)
+### AppImage (portable)
 ```bash
 chmod +x build_appimage.sh
 ./build_appimage.sh
 chmod +x Linux_TinyTask-*.AppImage
-sudo ./Linux_TinyTask-*.AppImage   # UYARI: çıplak sudo GUI'yi bozar; display env'leri taşıyın:
 sudo env "DISPLAY=$DISPLAY" "WAYLAND_DISPLAY=$WAYLAND_DISPLAY" \
   "XDG_RUNTIME_DIR=$XDG_RUNTIME_DIR" ./Linux_TinyTask-*.AppImage
 ```
 
-## 🖥️ Kullanım
+## 🖥️ Usage
 
-1. Uygulamayı başlat (pencere her zaman üstte).
-2. **Kontrol** sekmesi → `● Kaydet` (veya `Ctrl+Alt+Shift+R`) → işlemleri yap → `■ Durdur`.
-3. Döngü ayarı: `Sonsuz döngü` işaretle ya da `1–9999` seç → `Döngü Ayarını Uygula` (gönderilmezse varsayılan `1` kullanılır).
-4. `▶ Oynat` (veya `Ctrl+Alt+Shift+P`) → durdurmak için oynatma sırasındaki **iki butondan herhangi biri** (veya `Ctrl+Alt+Shift+S`). Durdurma, kanal gecikmesinden bağımsız paylaşılan atomic bayrakla anında emit'i keser.
-5. Durum satırı ve `Kaydedilen event` sayacı o anki durumu gösterir.
+1. Launch the app (window stays on top).
+2. **Control** tab → `● Record` (or `Ctrl+Alt+Shift+R`) → do your actions → `■ Stop`.
+3. Loop setting: check `Infinite loop` or pick `1–9999` → `Apply Loop Setting` (default is `1` if never applied).
+4. `▶ Play` (or `Ctrl+Alt+Shift+P`) → to stop, press **either** `■ Stop` button while playing (or `Ctrl+Alt+Shift+S`). Stopping cuts emission instantly via a shared atomic flag, independent of channel latency.
+5. The status line and `Recorded events` counter show the current state.
 
-### Config Dosyası
-Yol: `~/.config/linux-tinytask/tinytask_config.json`
-Örnek:
+### Config File
+Path: `~/.config/linux-tinytask/tinytask_config.json`
+Example:
 ```json
 {
   "record": { "ctrl": true, "alt": true, "shift": true, "super_key": false, "key_code": 19 },
@@ -160,52 +171,53 @@ Yol: `~/.config/linux-tinytask/tinytask_config.json`
   "stop":   { "ctrl": true, "alt": true, "shift": true, "super_key": false, "key_code": 31 }
 }
 ```
-Anahtar kodlar Linux evdev kodlarıdır (19=R, 25=P, 31=S, 1=Esc, 57=Space vb. — tam liste `models.rs` içinde).
+Key codes are Linux evdev codes (19=R, 25=P, 31=S, 1=Esc, 57=Space, 66=F8, … — full list in `models.rs`).
 
-### Makro Dosyaları
-- Kontrol sekmesindeki `💾 Kaydet` / `📂 Yükle` veya `Makrolar` sekmesi kullanılır (`rfd` native dialog).
-- Uzantıya göre format: `.json` → insan-okunabilir JSON, `.tts` (veya diğer) → `bincode` binary (küçük/hızlı).
-- Dosya yapısı: `MacroFile { version: 1, name, created_at, duration_us, event_count, events }`. Dosya IO recorder thread'de yapılır (UI bloklanmaz); yüklenen makro player kopyasına anında senkronize edilir.
-- Test: `cargo test` (7 test: json/binary roundtrip, path-traversal reddi, tek-tuş eşleşme, sleep doğruluğu, stop tepkisi, tuş takibi).
+### Macro Files
+- Use `💾 Save` / `📂 Load` in the Control tab or the `Macros` tab (`rfd` native dialog).
+- Format by extension: `.json` → human-readable JSON, `.tts` (or other) → `bincode` binary (small/fast).
+- File layout: `MacroFile { version: 1, name, created_at, duration_us, event_count, events }`. File IO happens in the recorder thread (UI never blocks); a loaded macro is instantly synced to the player copy.
+- Tests: `cargo test` (7 tests: json/binary roundtrip, path-traversal rejection, single-key matching, sleep accuracy, stop responsiveness, key tracking).
 
-## ⚠️ Bilinen Eksikler / Sınırlılıklar
+## ⚠️ Known Limitations
 
-Kodun güncel durumuna göre dürüst liste (detay `HANDOFF.md` içinde):
+Honest list for the current code (details in `HANDOFF.md`):
 
-1. **ABS (absolute) eksen oynatılmıyor**: Recorder `ABS` eventlerini kaydeder ama `player.rs` sanal cihazı sadece tuş + `REL_X/Y/WHEEL/HWHEEL` açar. Grafik tablet/touchscreen mutlak konumları oynatılamaz.
-2. **Sync thread kırılgan**: `Recording → Idle` geçişini 5ms'de bir poll ederek yakalar; hızlı toggle veya boş kayıt edge-case'lerinde yarış olabilir.
-3. **Kapanış temiz değil**: UI kapanınca `std::process::exit(0)` ile sert çıkış yapılır; thread'lere `Quit` gönderilmez. (Player içi Quit artık oynatma sırasında da işleniyor.)
-4. **Hotkey thread'de çıkış yok**: Sonsuz `loop`, `Quit` dinlemez; power/video/lid filtreler ama yine de tüm klavyeleri dinler.
-5. **Hotkey tuşları kayda karışır**: Kayıt sırasında hotkey'e basılan tuşlar filtrelenmez.
-6. Kayıt sırasında hotkey'e basılan tuşlar kayda karışır (kayda UI butonuyla başlanırsa sorun olmaz).
+1. **No ABS (absolute) axis playback**: the recorder captures `ABS` events but the `player.rs` virtual device only exposes keys + `REL_X/Y/WHEEL/HWHEEL`. Graphics-tablet/touchscreen absolute positions can't be replayed.
+2. **Fragile sync thread**: detects the `Recording → Idle` transition by polling every 5ms; races possible on fast toggles or empty recordings.
+3. **Unclean shutdown**: UI close calls `std::process::exit(0)`; no `Quit` propagation to threads. (In-playback Quit is handled inside the player.)
+4. **Hotkey thread never exits**: infinite `loop`, doesn't listen for `Quit`; filters power/video/lid but still listens to all keyboards.
+5. **Hotkey presses leak into recordings**: keys pressed for hotkeys aren't filtered from the recording (no problem when recording is started via UI button).
+6. Recording while hotkeys are pressed can capture them (start recording via UI button to avoid this).
 
-## 🛣️ Yol Haritası
-- [x] Makro kaydet/yükle (JSON + bincode): dosya dialogu + `SaveMacro/LoadMacro` implementasyonu
-- [x] Acil durdurma + zamanlama düzeltmesi (kesilebilir sleep, oynatma-içi kanal yoklama)
-- [x] Süre hesaplama + UI gösterimi
-- [x] Makro yönetim paneli (Makrolar sekmesi)
-- [x] Hotkey atama (tek tuş dahil: Ayarlar → Değiştir → tuşa bas; diske kaydedilir)
-- [x] Stop/finish'te takılı tuşları otomatik bırakma (bozuk klavye/fare düzeltmesi)
-- [ ] ABS eksen + `REL_Z` vb. için sanal cihaz genişletmesi
-- [ ] Düzgün shutdown (`Quit` yayılımı, `process::exit` kaldırma)
-- [ ] Kayıt sırasında hotkey'e basılan tuşların kayda karışmaması
-- [ ] Oynatma hız çarpanı, gecikme düzenleme
+## 🛣️ Roadmap
+- [x] Macro save/load (JSON + bincode): file dialog + `SaveMacro/LoadMacro` implementation
+- [x] Emergency stop + timing fix (interruptible sleep, in-playback channel polling)
+- [x] Duration computation + UI display
+- [x] Macro management panel (Macros tab)
+- [x] Hotkey assignment (incl. single key: Settings → Change → press key; saved to disk)
+- [x] Auto-release stuck keys on stop/finish (broken keyboard/mouse fix)
+- [x] One-command install (`install.sh`) with menu entry
+- [ ] ABS axis + `REL_Z` etc. virtual-device extension
+- [ ] Clean shutdown (`Quit` propagation, remove `process::exit`)
+- [ ] Filter hotkey presses out of recordings
+- [ ] Playback speed multiplier, latency tuning
 
-## 🧪 Test Senaryoları (talepten)
-1. **Durdurma**: 10sn makro kaydet → oynat → 2. sn'de durdur. Beklenen: emit anında kesilir, kalan eventler oynatılmaz, durum Idle. (Manuel: `/dev/input`+`uinput` izinli gerçek makinede.)
-2. **Zamanlama**: 5sn makro → oynat → toplam süre 5s ±50ms olmalı. Not: ilk event öncesi bekleme de kayda dahildir.
-3. **Loop durdurma**: sonsuz döngü → durdur → yeni loop başlamamalı, `Playback stopped` logu.
-4. **Kaydet/Yükle**: kaydet → dosyaya yaz → kapat/aç → yükle → oynat. Otomatik: `cargo test` (7 test geçiyor).
-5. **Büyük makro**: 10.000 event roundtrip — `cargo test` + manuel kayıt ile doğrulanmalı.
+## 🧪 Test Scenarios
+1. **Stop**: record a 10s macro → play → stop at 2s. Expected: emission stops instantly, remaining events never play, state returns to Idle. (Manual: needs `/dev/input`+`uinput` access on a real machine.)
+2. **Timing**: play a 5s macro → total playback should be 5s ±50ms. Note: pre-first-event waiting is part of the recording by design.
+3. **Loop stop**: stop during infinite loop → no new loop starts, `Playback stopped` in log.
+4. **Save/Load**: record → save to file → restart app → load → play. Automated: `cargo test` (7 tests passing).
+5. **Large macro**: 10,000-event roundtrip — `cargo test` + manual recording.
 
-## 🐛 Sorun Giderme
-| Belirti | Neden / Çözüm |
+## 🐛 Troubleshooting
+| Symptom | Cause / Fix |
 |---|---|
-| `Cannot read /dev/input` | `input` grubunda değilsin → `usermod -a -G input $USER` + relogin |
-| `Sanal cihaz oluşturulamadı` | `uinput` izni yok → `usermod -a -G uinput $USER` veya `sudo` ile çalıştır; `ls -l /dev/uinput` kontrol et |
-| `Oynatılacak event yok!` | Kayıt boş → önce kayıt yap veya Makrolar sekmesinden dosya yükle (kaydedilmemiş kayıt restart'ta sıfırlanır) |
-| Hotkey çalışmıyor | Başka uygulama tuşu yutuyor olabilir; terminalden `RUST_LOG=debug` ile basılan kodları gözle |
-| Wayland'da çalışmıyor | İzin sorunudur, display server ile ilgili değildir — grupları kontrol et |
+| `Cannot read /dev/input` | Not in `input` group → `usermod -a -G input $USER` + relogin (or run `install.sh`) |
+| `Virtual device creation failed` | No `uinput` access → `install.sh` (udev rule) or run as root; check `ls -l /dev/uinput` |
+| `No events to play!` | Recording empty → record first or load a file from the Macros tab (unsaved recordings reset on restart) |
+| Hotkey not working | Another app may swallow the key; watch pressed codes with `RUST_LOG=debug` |
+| Not working on Wayland | It's a permission issue, not display-server related — check groups |
 
-## 📄 Lisans
-MIT — detay için `LICENSE` dosyasına bakın.
+## 📄 License
+MIT — see `LICENSE`.
